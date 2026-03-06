@@ -1,0 +1,28 @@
+# Railway deployment configuration
+# This project uses multiple services — configure each in the Railway dashboard:
+#
+# Service: api (this repo, default)
+#   Build: npm run build
+#   Start: npm run db:migrate && npm start
+#   Port: 3000
+#
+# Service: worker (same repo, different start command)
+#   Build: npm install
+#   Start: npm run db:migrate && npm run worker
+#   No port (background process)
+#
+# Service: postgres (Railway managed)
+#   Plugin: PostgreSQL
+#   Env var: DATABASE_URL (auto-populated via Railway reference variable)
+#
+# Service: redis (Railway managed)
+#   Plugin: Redis / Valkey
+#   Env var: REDIS_URL (auto-populated via Railway reference variable)
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+healthcheckPath = "/api/health"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

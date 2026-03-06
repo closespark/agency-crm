@@ -1,0 +1,1661 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// AUTH & USERS
+// ============================================
+
+model User {
+  id             String    @id @default(cuid())
+  name           String?
+  email          String    @unique
+  emailVerified  DateTime?
+  hashedPassword String?
+  image          String?
+  role           String    @default("member") // admin, manager, member
+  teamId         String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  team         Team?          @relation(fields: [teamId], references: [id])
+  accounts     Account[]
+  sessions     Session[]
+  ownedDeals   Deal[]         @relation("DealOwner")
+  ownedContacts Contact[]     @relation("ContactOwner")
+  activities   Activity[]
+  tasks        Task[]
+  auditLogs    AuditLog[]
+  messages     Message[]
+  comments     Comment[]
+  notifications Notification[]
+  assignedTickets Ticket[]       @relation("TicketAssignee")
+  assignedConversations Conversation[] @relation("ConversationAssignee")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users       User[]
+  permissions Permission[]
+}
+
+model Permission {
+  id       String  @id @default(cuid())
+  teamId   String
+  resource String  // contacts, deals, tickets, etc.
+  action   String  // create, read, update, delete
+  allowed  Boolean @default(true)
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, resource, action])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  action     String   // created, updated, deleted, viewed
+  resource   String   // contact, deal, ticket, etc.
+  resourceId String
+  details    String?  // JSON string of changes
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([resource, resourceId])
+  @@index([createdAt])
+}
+
+// ============================================
+// CRM CORE
+// ============================================
+
+model Contact {
+  id             String   @id @default(cuid())
+  firstName      String
+  lastName       String
+  email          String?  @unique
+  phone          String?
+  jobTitle       String?
+
+  // Full 8-stage lifecycle (data layer): subscriber, lead, mql, sql, opportunity, customer, evangelist
+  // Simplified 5-stage UI view: lead, engaged (=mql), opportunity (=sql+opportunity), client (=customer), advocate (=evangelist)
+  lifecycleStage String   @default("subscriber")
+  leadStatus     String?  // new, contacted, interested, unqualified, bad_timing, recycled, nurturing, re_engaged
+
+  // Dual scoring model: fitScore persists forever, engagementScore decays
+  leadScore      Int      @default(0)   // composite (fitScore + engagementScore)
+  fitScore       Int      @default(0)   // demographic + firmographic (never decays)
+  engagementScore Int     @default(0)   // behavioral + recency (decays 25%/month, resets at 90 days)
+  engagementScoreLastDecay DateTime?    // when decay was last applied
+
+  // Stage tracking
+  stageEnteredAt DateTime?              // when current lifecycle stage was entered
+  stageHistory   String?                // JSON: [{ from, to, triggeredBy, reason, timestamp }]
+
+  // BANT qualification (auto-extracted from conversations by AI)
+  bantBudget     String?  // "confirmed" | "unconfirmed" | "no_budget"
+  bantAuthority  String?  // "decision_maker" | "influencer" | "no_authority"
+  bantNeed       String?  // "confirmed" | "exploring" | "no_need"
+  bantTimeline   String?  // "immediate" | "1_3_months" | "3_6_months" | "6_plus_months" | "no_timeline"
+  bantNotes      String?  // JSON: { budget: "exact words", authority: "exact words", need: "exact words", timeline: "exact words" }
+  bantScore      Int      @default(0)   // 0-4 count of confirmed BANT criteria
+  bantLastUpdated DateTime?
+
+  ownerId        String?
+  companyId      String?
+  source         String?  // instantly, inbound, referral, organic, paid
+  domainTier     String   @default("cold") // cold = Instantly pre-warmed, warm = branded agency domain
+  customFields   String?  // JSON
+
+  // Scoring optimization
+  scoreDirty         Boolean   @default(true)  // set true when any signal changes, cleared after scoring
+  lastScoreEvaluated DateTime? // when lead score was last calculated
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  owner      User?      @relation("ContactOwner", fields: [ownerId], references: [id])
+  company    Company?   @relation(fields: [companyId], references: [id])
+  deals      Deal[]
+  activities Activity[]
+  tickets    Ticket[]
+  tasks      Task[]
+  messages   Message[]
+  formSubmissions FormSubmission[]
+  listMemberships ListMembership[]
+  emailEvents EmailEvent[]
+  sequenceEnrollments SequenceEnrollment[]
+  leads      Lead[]
+  clientLifecycles ClientLifecycle[]
+  pageViews  PageView[]
+  pandaDocuments PandaDocument[]
+  aiConversationLogs AIConversationLog[]
+
+  @@index([companyId])
+  @@index([ownerId])
+  @@index([lifecycleStage])
+  @@index([scoreDirty])
+  @@index([leadScore])
+  @@index([createdAt])
+  @@index([source])
+}
+
+model Company {
+  id           String   @id @default(cuid())
+  name         String
+  domain       String?  @unique
+  industry     String?
+  size         String?  // 1-10, 11-50, 51-200, 201-500, 501-1000, 1001+
+  revenue      Float?
+  phone        String?
+  address      String?
+  city         String?
+  state        String?
+  country      String?
+  description  String?
+
+  // Company lifecycle mirrors contact stages, pushed forward by highest contact stage
+  lifecycleStage String  @default("subscriber")
+
+  customFields String?  // JSON
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  contacts Contact[]
+  deals    Deal[]
+  tickets  Ticket[]
+  leads    Lead[]
+  clientLifecycles ClientLifecycle[]
+
+  @@index([lifecycleStage])
+}
+
+// Lead: bridge object between Contact and Deal (HubSpot 2024 pattern)
+// A Lead cannot exist standalone — must attach to a Contact or Company
+// Has its own pipeline: new → attempting → connected → qualified → disqualified
+model Lead {
+  id          String   @id @default(cuid())
+  contactId   String
+  companyId   String?
+
+  // Lead pipeline stage (separate from contact lifecycle)
+  stage       String   @default("new") // new, attempting, connected, qualified, disqualified
+  stageEnteredAt DateTime @default(now())
+
+  // BANT qualification status at lead level
+  bantBudget    Boolean  @default(false)
+  bantAuthority Boolean  @default(false)
+  bantNeed      Boolean  @default(false)
+  bantTimeline  Boolean  @default(false)
+  bantNotes     String?  // JSON: detailed qualification notes
+
+  // Source and channel tracking
+  source        String?  // form_fill, linkedin, referral, instantly, apollo, inbound
+  channel       String?  // email, linkedin, phone, chat, form
+  campaignId    String?  // which campaign generated this lead
+
+  // Auto-advance rules
+  // "attempting" = outreach activity logged
+  // "connected" = reply received
+  // "qualified" = BANT 4/4 or 3/4 with strong signals → forces deal creation
+  // "disqualified" = hard no, bad fit, or 4+ failed attempts
+
+  disqualifyReason String? // bad_fit, no_budget, competitor, timing, unresponsive
+  qualifiedAt      DateTime?
+  disqualifiedAt   DateTime?
+
+  dealId        String?  // deal created when lead qualifies
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  company  Company? @relation(fields: [companyId], references: [id])
+
+  @@index([contactId])
+  @@index([companyId])
+  @@index([stage])
+  @@index([dealId])
+  @@index([createdAt])
+}
+
+model Deal {
+  id          String   @id @default(cuid())
+  name        String
+  amount      Float?
+  currency    String   @default("USD")
+
+  // Agency-specific pipeline stages with enforced win probability
+  // discovery (10%) → proposal_sent (40%) → negotiation (60%) → contract_sent (80%) → closed_won (100%) → closed_lost (0%)
+  stage       String   @default("discovery")
+  pipeline    String   @default("new_business") // new_business, client_lifecycle
+
+  // Win probability auto-set by stage but overridable by AI
+  probability Int?
+  closeDate   DateTime?
+
+  // Stage gate tracking
+  stageEnteredAt DateTime?
+  stageHistory   String?  // JSON: [{ from, to, triggeredBy, reason, timestamp, requiredFieldsSnapshot }]
+
+  // Required fields per stage (enforced by lifecycle engine)
+  painPoints     String?  // required at discovery
+  scopeOfWork    String?  // required at proposal_sent
+  proposalDoc    String?  // required at proposal_sent
+  pricingBreakdown String? // required at proposal_sent
+  negotiationNotes String? // required at negotiation
+  revisedTerms   String?  // required at negotiation
+  contractSentAt DateTime? // required at contract_sent
+  contractVersion String?  // required at contract_sent
+  contractSignedAt DateTime? // set at closed_won
+  actualAmount   Float?   // set at closed_won (may differ from estimated)
+  paymentTerms   String?  // set at closed_won
+  startDate      DateTime? // set at closed_won (implementation/project start)
+  contractLength Int?     // months, set at closed_won
+
+  // Loss tracking (required for closed_lost — no skipping)
+  lostReason     String?  // budget, authority, need, timing, competitor, went_silent, scope_mismatch
+  lostToCompetitor String? // competitor name if applicable
+  lostNotes      String?
+
+  // BANT snapshot at deal creation
+  bantSnapshot   String?  // JSON: BANT status when deal was created
+
+  ownerId     String?
+  contactId   String?
+  companyId   String?
+  customFields String? // JSON
+  position    Int      @default(0) // for kanban ordering
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner      User?      @relation("DealOwner", fields: [ownerId], references: [id])
+  contact    Contact?   @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  company    Company?   @relation(fields: [companyId], references: [id])
+  activities Activity[]
+  quotes     Quote[]
+  aiConversationLogs AIConversationLog[]
+
+  @@index([contactId])
+  @@index([companyId])
+  @@index([ownerId])
+  @@index([stage])
+  @@index([pipeline])
+  @@index([closeDate])
+  @@index([createdAt])
+}
+
+// Client Lifecycle Pipeline — the post-sale revenue engine
+// This is where 80% of agency revenue lives (retainers, renewals, expansion, upsells)
+model ClientLifecycle {
+  id          String   @id @default(cuid())
+  contactId   String
+  companyId   String?
+  dealId      String?  // the deal that created this client relationship
+
+  // Post-sale stages: onboarding → active → renewal → expansion → at_risk → churned → win_back
+  stage       String   @default("onboarding")
+  stageEnteredAt DateTime @default(now())
+  stageHistory   String?  // JSON: [{ from, to, triggeredBy, reason, timestamp }]
+
+  // Health tracking
+  healthScore Int      @default(80) // 0-100, starts high, degrades on negative signals
+  npsScore    Int?
+  csatScore   Int?
+  lastHealthCheck DateTime?
+
+  // Contract tracking
+  contractValue  Float?
+  monthlyValue   Float?
+  renewalDate    DateTime?
+  contractStartDate DateTime?
+  contractEndDate   DateTime?
+
+  // Engagement metrics
+  ticketCount    Int      @default(0)
+  avgTicketSentiment String? // positive, neutral, negative
+  lastActivityAt DateTime?
+  scopeCreepCount Int     @default(0) // requests outside scope
+
+  // Expansion tracking
+  expansionOpportunity String? // JSON: { type, estimatedValue, description }
+  upsellSignals  String?  // JSON: [{ signal, date, description }]
+
+  // Churn signals
+  churnRiskLevel String   @default("low") // low, medium, high, critical
+  churnSignals   String?  // JSON: [{ signal, date, severity }]
+
+  // Win-back (if churned)
+  churnedAt      DateTime?
+  churnReason    String?
+  winBackAttempts Int     @default(0)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  company  Company? @relation(fields: [companyId], references: [id])
+
+  @@index([contactId])
+  @@index([companyId])
+  @@index([stage])
+  @@index([churnRiskLevel])
+  @@index([renewalDate])
+}
+
+// Stage Gate Configuration — defines required fields and conditions for each stage transition
+model StageGate {
+  id          String   @id @default(cuid())
+  objectType  String   // contact, deal, lead, client_lifecycle
+  fromStage   String
+  toStage     String
+  requiredFields String // JSON: ["field1", "field2"] — fields that must be populated
+  conditions  String?  // JSON: [{ field, operator, value }] — additional conditions
+  autoAdvance Boolean  @default(false) // can AI auto-advance without human review?
+  confidenceThreshold Float? // minimum AI confidence to auto-advance (0-1)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@unique([objectType, fromStage, toStage])
+}
+
+// Lifecycle Transition Audit Trail — every stage change is recorded, forward-only enforced
+model LifecycleTransition {
+  id          String   @id @default(cuid())
+  objectType  String   // contact, deal, lead, client_lifecycle
+  objectId    String
+  fromStage   String
+  toStage     String
+  triggeredBy String   // ai_auto, workflow, manual, deal_sync, ticket_signal
+  reason      String?  // why this transition happened
+  gateValidation String? // JSON: { passed: true/false, requiredFields: {}, missingFields: [] }
+  confidence  Float?   // AI confidence in this decision (0-1)
+  metadata    String?  // JSON: additional context
+  createdAt   DateTime @default(now())
+
+  @@index([objectType, objectId])
+  @@index([createdAt])
+}
+
+model Activity {
+  id         String   @id @default(cuid())
+  type       String   // email, call, meeting, note, task
+  subject    String?
+  body       String?
+  userId     String
+  contactId  String?
+  dealId     String?
+  duration   Int?     // in seconds
+  outcome    String?  // connected, no_answer, left_voicemail, busy
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id])
+  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal    Deal?    @relation(fields: [dealId], references: [id])
+
+  @@index([contactId])
+  @@index([dealId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  type        String    @default("todo") // todo, call, email, follow_up
+  priority    String    @default("medium") // low, medium, high, urgent
+  status      String    @default("pending") // pending, in_progress, completed
+  dueDate     DateTime?
+  userId      String
+  contactId   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id])
+  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([contactId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+// ============================================
+// SERVICE & TICKETING
+// ============================================
+
+model Ticket {
+  id          String   @id @default(cuid())
+  subject     String
+  description String?
+  status      String   @default("new") // new, waiting_on_contact, waiting_on_us, in_progress, review_qa, closed
+  priority    String   @default("medium") // low, medium, high, urgent
+  category    String?
+  pipeline    String   @default("support")
+  contactId   String?
+  companyId   String?
+  assigneeId  String?
+  slaDeadline DateTime?
+  resolvedAt  DateTime?
+
+  // Revenue signal fields (fed into ticket intelligence engine)
+  sentiment   String?  // positive, neutral, negative (AI-analyzed)
+  scopeCreep  Boolean  @default(false) // request outside current scope → upsell signal
+  churnSignal Boolean  @default(false) // negative pattern detected
+  upsellSignal Boolean @default(false) // capability request outside current scope
+
+  customFields String? // JSON
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  contact  Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  company  Company?  @relation(fields: [companyId], references: [id])
+  assignee User?     @relation("TicketAssignee", fields: [assigneeId], references: [id])
+  comments Comment[]
+
+  @@index([contactId])
+  @@index([companyId])
+  @@index([assigneeId])
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  body      String
+  ticketId  String
+  userId    String
+  isPublic  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+model KnowledgeArticle {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  body        String
+  category    String?
+  status      String   @default("draft") // draft, published
+  viewCount   Int      @default(0)
+  helpfulCount Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model FeedbackSurvey {
+  id        String   @id @default(cuid())
+  type      String   // nps, csat, ces
+  score     Int
+  comment   String?
+  contactId String?
+  dealId    String?
+  clientLifecycleId String? // link to client lifecycle for post-sale surveys
+  createdAt DateTime @default(now())
+}
+
+// ============================================
+// MARKETING & AUTOMATION
+// ============================================
+
+model EmailTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  subject   String
+  body      String   // HTML
+  category  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model EmailEvent {
+  id         String   @id @default(cuid())
+  contactId  String
+  templateId String?
+  type       String   // sent, opened, clicked, bounced, unsubscribed
+  metadata   String?  // JSON
+  createdAt  DateTime @default(now())
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model Form {
+  id          String   @id @default(cuid())
+  name        String
+  fields      String   // JSON array of field definitions
+  submitLabel String   @default("Submit")
+  redirectUrl String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  submissions FormSubmission[]
+}
+
+model FormSubmission {
+  id        String   @id @default(cuid())
+  formId    String
+  contactId String?
+  data      String   // JSON
+  createdAt DateTime @default(now())
+
+  form    Form     @relation(fields: [formId], references: [id])
+  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+}
+
+model Workflow {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  trigger     String   // JSON: { type, conditions }
+  actions     String   // JSON array of action steps
+  isActive    Boolean  @default(false)
+  lastRunAt   DateTime?
+  runCount    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Campaign {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // email, social, ads, content
+  status      String   @default("draft") // draft, active, paused, completed
+  budget      Float?
+  startDate   DateTime?
+  endDate     DateTime?
+  metrics     String?  // JSON: { sent, opened, clicked, converted }
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ContactList {
+  id        String   @id @default(cuid())
+  name      String
+  type      String   @default("static") // static, dynamic
+  filters   String?  // JSON for dynamic lists
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships ListMembership[]
+}
+
+model ListMembership {
+  id        String   @id @default(cuid())
+  listId    String
+  contactId String
+  createdAt DateTime @default(now())
+
+  list    ContactList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  contact Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, contactId])
+}
+
+// ============================================
+// SALES TOOLS
+// ============================================
+
+model Sequence {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  steps       String   // JSON array of sequence steps
+  isActive    Boolean  @default(true)
+  aiGenerated Boolean  @default(false) // AI wrote the sequence copy
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  enrollments SequenceEnrollment[]
+}
+
+model Meeting {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  startTime   DateTime
+  endTime     DateTime
+  location    String?  // url or physical
+  type        String   @default("one_on_one") // one_on_one, group, round_robin, consultation
+  contactId   String?
+  organizerId String?
+  status      String   @default("scheduled") // scheduled, requested, completed, cancelled, no_show
+  reminderSentAt DateTime? // tracks when pre-meeting reminder was sent
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  transcript  MeetingTranscript?
+}
+
+model MeetingTranscript {
+  id          String   @id @default(cuid())
+  meetingId   String   @unique
+  meeting     Meeting  @relation(fields: [meetingId], references: [id])
+  source      String   @default("tldv") // tldv, manual, vapi
+  rawTranscript String // full transcript text
+  summary     String?  // AI-generated summary
+  actionItems String?  // JSON array of action items
+  bantExtract String?  // JSON: { budget, authority, need, timeline, confidence }
+  dealSignals String?  // JSON: { buyIntent, objections, nextSteps, stageRecommendation }
+  sentiment   String?  // positive, neutral, negative, mixed
+  followUpSent Boolean @default(false)
+  analyzedAt  DateTime?
+  createdAt   DateTime @default(now())
+}
+
+model Quote {
+  id          String   @id @default(cuid())
+  name        String
+  dealId      String
+  lineItems   String   // JSON array
+  subtotal    Float
+  tax         Float    @default(0)
+  discount    Float    @default(0)
+  total       Float
+  status      String   @default("draft") // draft, sent, signed, declined
+  expiresAt   DateTime?
+  signedAt    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  deal Deal @relation(fields: [dealId], references: [id])
+}
+
+// ============================================
+// COMMUNICATION
+// ============================================
+
+model Conversation {
+  id        String   @id @default(cuid())
+  channel   String   // email, chat, whatsapp
+  status    String   @default("open") // open, assigned, closed
+  assigneeId String?
+  contactId String?
+  subject   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignee User?    @relation("ConversationAssignee", fields: [assigneeId], references: [id])
+  messages Message[]
+
+  @@index([assigneeId])
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  userId         String?
+  contactId      String?
+  body           String
+  direction      String   @default("inbound") // inbound, outbound
+  isInternal     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id])
+  contact      Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  body      String?
+  type      String   // deal_update, task_due, mention, assignment
+  resourceType String?
+  resourceId   String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+// ============================================
+// CMS
+// ============================================
+
+model Page {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  content     String   // JSON blocks
+  template    String   @default("default")
+  status      String   @default("draft") // draft, published
+  metaTitle   String?
+  metaDesc    String?
+  publishedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model BlogPost {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  body        String
+  excerpt     String?
+  coverImage  String?
+  author      String?
+  tags        String?  // comma separated
+  status      String   @default("draft") // draft, published
+  publishedAt DateTime?
+  viewCount   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model MediaAsset {
+  id        String   @id @default(cuid())
+  name      String
+  url       String
+  type      String   // image, video, document
+  size      Int
+  mimeType  String
+  createdAt DateTime @default(now())
+}
+
+// ============================================
+// INTEGRATIONS
+// ============================================
+
+model Integration {
+  id           String   @id @default(cuid())
+  name         String   // instantly, slack, google, etc.
+  type         String   // oauth, api_key, webhook
+  config       String   // JSON (encrypted in production)
+  isActive     Boolean  @default(false)
+  lastSyncAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  webhookEvents WebhookEvent[]
+}
+
+model WebhookEvent {
+  id            String   @id @default(cuid())
+  integrationId String
+  eventType     String
+  payload       String   // JSON
+  status        String   @default("pending") // pending, processed, failed
+  processedAt   DateTime?
+  error         String?
+  createdAt     DateTime @default(now())
+
+  integration Integration @relation(fields: [integrationId], references: [id])
+}
+
+// ============================================
+// AI ENGINE
+// ============================================
+
+model AIAgent {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  systemPrompt String
+  model       String   @default("claude-sonnet-4-20250514")
+  temperature Float    @default(0.7)
+  isActive    Boolean  @default(true)
+  config      String?  // JSON: agent-specific config
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  jobs AIJob[]
+}
+
+model AIJob {
+  id          String    @id @default(cuid())
+  agentId     String
+  type        String
+  status      String    @default("pending") // pending, running, completed, failed, cancelled
+  input       String    // JSON input data
+  output      String?   // JSON output data
+  error       String?
+  tokens      Int?
+  cost        Float?
+  contactId   String?
+  dealId      String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  agent   AIAgent  @relation(fields: [agentId], references: [id])
+
+  @@index([agentId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([contactId])
+}
+
+model ProspectSearch {
+  id            String   @id @default(cuid())
+  name          String
+  icp           String   // JSON: ideal customer profile
+  status        String   @default("draft") // draft, searching, enriching, complete
+  resultsCount  Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  prospects Prospect[]
+}
+
+model Prospect {
+  id              String   @id @default(cuid())
+  searchId        String
+  firstName       String?
+  lastName        String?
+  email           String?
+  phone           String?
+  linkedinUrl     String?
+  jobTitle        String?
+  companyName     String?
+  companyDomain   String?
+  companySize     String?
+  industry        String?
+  location        String?
+  enrichedData    String?  // JSON
+  aiAnalysis      String?  // JSON
+  fitScore        Int?     // 0-100
+  status          String   @default("new") // new, verified, contacted, converted, rejected
+  contactId       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  search ProspectSearch @relation(fields: [searchId], references: [id], onDelete: Cascade)
+
+  @@index([searchId])
+  @@index([status])
+  @@index([email])
+  @@index([contactId])
+}
+
+model SequenceEnrollment {
+  id          String    @id @default(cuid())
+  sequenceId  String
+  contactId   String
+  status      String    @default("active") // active, paused, completed, bounced, replied, unsubscribed
+  currentStep Int       @default(0)
+  channel     String    @default("email") // email, linkedin, multi
+  nextActionAt DateTime?
+  completedAt DateTime?
+  metadata    String?   // JSON: tracking data
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  sequence Sequence @relation(fields: [sequenceId], references: [id])
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@index([sequenceId])
+  @@index([status])
+  @@index([nextActionAt])
+  @@index([contactId, status, channel])
+}
+
+model InstantlyCampaign {
+  id              String   @id @default(cuid())
+  instantlyId     String?
+  name            String
+  status          String   @default("draft") // draft, active, paused, completed
+  sendingAccountId String?
+  dailyLimit      Int      @default(30)
+  sequences       String   // JSON
+  leads           String?  // JSON
+  metrics         String?  // JSON
+  syncedAt        DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model LeadScoreRule {
+  id          String  @id @default(cuid())
+  name        String
+  category    String  // demographic, behavioral, engagement, firmographic, negative, decay
+  condition   String  // JSON: { field, operator, value }
+  points      Int
+  isActive    Boolean @default(true)
+  isAIManaged Boolean @default(false)
+  createdAt   DateTime @default(now())
+}
+
+model AIConversationLog {
+  id              String   @id @default(cuid())
+  contactId       String?
+  dealId          String?
+  channel         String   // email, linkedin, chat
+  direction       String   // inbound, outbound
+  rawContent      String
+  aiSummary       String?
+  sentiment       String?  // positive, neutral, negative, urgent
+  intent          String?  // interested, objection, question, meeting_request, not_interested, out_of_office
+  objectionType   String?  // timing, budget, authority, need, competition
+  objectionVerbatim String?
+  confidenceDelta Float?
+  preferredChannel String?
+  suggestedAction String?  // JSON
+  actionTaken     Boolean  @default(false)
+  autoActioned    Boolean  @default(false)
+
+  // BANT extraction from this conversation
+  bantExtracted   String?  // JSON: { budget, authority, need, timeline } extracted from this message
+
+  metadata        String?  // JSON: { gmailMessageId, gmailThreadId, sentVia, etc. }
+
+  createdAt       DateTime @default(now())
+
+  contact  Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal     Deal?    @relation(fields: [dealId], references: [id])
+
+  @@index([contactId])
+  @@index([dealId])
+  @@index([channel])
+  @@index([intent])
+  @@index([createdAt])
+}
+
+model AIInsight {
+  id          String   @id @default(cuid())
+  type        String   // deal_risk, upsell_opportunity, churn_warning, engagement_drop, hot_lead, meeting_suggestion, signal_detected, scoring_adjustment, lifecycle_transition, stage_gate_blocked, ticket_churn_signal, ticket_upsell_signal, referral_opportunity
+  title       String
+  description String
+  reasoning   String?
+  priority    String   @default("medium") // low, medium, high, critical
+  resourceType String  // contact, deal, company, lead, client_lifecycle, ticket
+  resourceId  String
+  actionItems String?  // JSON
+  actionsTaken String? // JSON
+  status      String   @default("new") // new, auto_actioned, acknowledged, acted_on, dismissed
+  createdAt   DateTime @default(now())
+
+  @@index([resourceType, resourceId])
+  @@index([type])
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt])
+}
+
+model SignalWatch {
+  id            String   @id @default(cuid())
+  contactId     String?
+  companyId     String?
+  prospectId    String?
+  type          String
+  status        String   @default("watching")
+  triggerConfig String   // JSON
+  lastCheckedAt DateTime?
+  triggeredAt   DateTime?
+  triggerData   String?  // JSON
+  autoAction    String?  // JSON
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model ChannelLock {
+  id          String   @id @default(cuid())
+  contactId   String   @unique
+  activeChannel String
+  sequenceId  String?
+  lockedAt    DateTime @default(now())
+  escalateAfterDays Int @default(7)
+  lastOutboundAt DateTime?
+  lastResponseAt DateTime?
+  escalationHistory String?
+  updatedAt   DateTime @updatedAt
+}
+
+model ConversionFeedback {
+  id            String   @id @default(cuid())
+  contactId     String
+  dealId        String?
+  outcome       String   // converted, lost, stalled, churned
+
+  // Source attribution
+  sourceSearch  String?
+  icpCriteria   String?  // JSON
+  winningAngle  String?
+  winningChannel String?
+  winningSequenceId String?
+  winningStepNumber Int?
+
+  // Prospect profile at time of conversion (snapshot for ICP learning)
+  companyIndustry String?
+  companySize     String?
+  companyRevenue  Float?
+  jobTitle        String?
+  seniorityLevel  String?
+  geography       String?
+  techStack       String?  // JSON
+
+  // Engagement profile at conversion
+  fitScoreAtConversion Int?
+  engagementScoreAtConversion Int?
+  bantScoreAtConversion Int?
+
+  // Signals present at first contact (for ICP signal learning)
+  signalsAtFirstContact String? // JSON: which Apollo signals were present
+
+  // Objections encountered
+  objections    String?  // JSON
+  lostReason    String?
+  lostToCompetitor String?
+
+  // Timing
+  timeToConvert Int?     // days from first touch
+  timeToFirstReply Int?  // days from first outreach to first reply
+  dealValue     Float?
+  notes         String?
+  createdAt     DateTime @default(now())
+}
+
+model WeeklySummary {
+  id             String   @id @default(cuid())
+  weekStarting   DateTime
+  pipelineValue  Float?
+  dealsWon       Int      @default(0)
+  dealsLost      Int      @default(0)
+  newContacts    Int      @default(0)
+  repliesReceived Int     @default(0)
+  meetingsBooked Int      @default(0)
+  topOutreachAngle String?
+  topConvertingProfile String?
+  stalledDeals   String?  // JSON
+  projectedRevenue Float?
+  aiAdjustments  String?  // JSON
+  narrative      String?
+  createdAt      DateTime @default(now())
+}
+
+model MeetingBrief {
+  id            String   @id @default(cuid())
+  meetingId     String   @unique
+  contactId     String?
+  dealId        String?
+  contactSummary String
+  touchpointHistory String // JSON
+  engagementHighlights String?
+  painPoints    String?
+  likelyObjections String? // JSON
+  recommendedAngle String?
+  competitorMentions String?
+  companyContext String?
+  generatedAt   DateTime @default(now())
+}
+
+model DomainHandoff {
+  id              String   @id @default(cuid())
+  contactId       String
+  fromDomain      String
+  toDomain        String
+  triggerIntent   String
+  triggerChannel  String
+  instantlyCampaignId String?
+  sequenceEnrollmentId String?
+  handoffStatus   String   @default("pending")
+  nextTouchpoint  String?  // JSON
+  warmSequenceId  String?
+  reasoning       String?
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ============================================
+// SELF-OPTIMIZATION ENGINE
+// ============================================
+
+// Living ICP profile — rewrites itself from close data
+model ICPProfile {
+  id              String   @id @default(cuid())
+  version         Int      @default(1)
+  isActive        Boolean  @default(true)
+
+  // Weighted criteria (JSON: { criterion: string, weight: number, evidence: string }[])
+  industries      String?  // JSON: ranked industries with weights
+  companySizes    String?  // JSON: size ranges with weights
+  jobTitles       String?  // JSON: titles with weights
+  geographies     String?  // JSON: regions with weights
+  techStack       String?  // JSON: technologies correlated with close
+  revenueRanges   String?  // JSON: revenue brackets with weights
+  growthSignals   String?  // JSON: which Apollo signals predict close
+  seniorityLevels String?  // JSON: Apollo seniority levels with weights
+
+  // Anti-targets (negative weights from churn + lost deals)
+  excludeIndustries String? // JSON: industries to avoid
+  excludeSignals    String? // JSON: signals correlated with churn
+  churnFingerprint  String? // JSON: profile patterns that predict churn
+  expansionFingerprint String? // JSON: patterns that predict expansion
+
+  // Performance metrics
+  totalDealsAnalyzed Int    @default(0)
+  winRate           Float?
+  avgDealSize       Float?
+  avgTimeToClose    Int?    // days
+  topConvertingProfile String?
+
+  // Apollo search parameters auto-generated from this profile
+  apolloSearchParams String? // JSON: ready-to-use Apollo API params
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Sequence performance tracking — per-step analytics
+model SequencePerformance {
+  id             String   @id @default(cuid())
+  sequenceId     String
+  stepNumber     Int
+  channel        String   // email, linkedin
+
+  // Metrics
+  sent           Int      @default(0)
+  opened         Int      @default(0)
+  clicked        Int      @default(0)
+  replied        Int      @default(0)
+  positiveReplied Int     @default(0)
+  negativeReplied Int     @default(0)
+  unsubscribed   Int      @default(0)
+  bounced        Int      @default(0)
+  meetingsBooked Int      @default(0)
+
+  // Rates (pre-calculated for query efficiency)
+  openRate       Float?
+  replyRate      Float?
+  positiveReplyRate Float?
+
+  // Content tracking
+  subjectLine    String?
+  messageAngle   String?  // AI-classified angle of the message
+
+  // Segment performance (JSON: { segment: string, replyRate: number }[])
+  segmentPerformance String?
+
+  // Time performance (JSON: { dayOfWeek: number, hour: number, replyRate: number }[])
+  sendTimePerformance String?
+
+  periodStart    DateTime
+  periodEnd      DateTime
+  createdAt      DateTime @default(now())
+
+  @@unique([sequenceId, stepNumber, periodStart])
+}
+
+// Objection library — accumulated from conversations, grouped by ICP segment
+model ObjectionEntry {
+  id             String   @id @default(cuid())
+  type           String   // timing, budget, authority, need, competition
+  severity       String   // soft, hard
+  verbatim       String   // exact prospect words
+  icpSegment     String?  // which ICP segment this came from
+  contactId      String?
+  dealId         String?
+  dealOutcome    String?  // won, lost, stalled (updated post-close)
+
+  // Counter-strategy (learned from deals that overcame this objection)
+  counterStrategy String?
+  counterWorked   Boolean?
+
+  createdAt      DateTime @default(now())
+}
+
+// StageGate accuracy — immutable per-gate per-week record, never updated
+model StageGateAccuracy {
+  id              String   @id @default(cuid())
+  stageGateId     String
+  objectType      String
+  fromStage       String
+  toStage         String
+  weekNumber      Int      // ISO week number
+  year            Int
+
+  // Immutable once written — append new weeks, never update historical
+  totalTransitions Int     @default(0)
+  truePositives    Int     @default(0)
+  falsePositives   Int     @default(0)
+  inconclusive     Int     @default(0)
+  accuracy         Float?  // truePositives / (truePositives + falsePositives)
+  confidenceThresholdAtTime Float? // what the threshold was when these decisions were made
+
+  createdAt       DateTime @default(now())
+
+  @@unique([stageGateId, weekNumber, year])
+}
+
+// Raw event log — replayable stream of every external API event
+// Written BEFORE processing. If processing logic has a bug, replay raw events.
+model RawEventLog {
+  id          String   @id @default(cuid())
+  source      String   // instantly, alfred, gmail, apollo, vapi
+  eventType   String   // reply, open, click, bounce, connection_accepted, etc.
+  rawPayload  String   // full JSON payload as received
+  processed   Boolean  @default(false)
+  processedAt DateTime?
+  processingError String?
+  contactId   String?  // resolved after processing
+  createdAt   DateTime @default(now())
+
+  @@index([source])
+  @@index([processed])
+  @@index([createdAt])
+}
+
+// System changelog — every autonomous change the system makes
+model SystemChangelog {
+  id          String   @id @default(cuid())
+  category    String   // icp, scoring, sequence, stage_gate, bant, client_health, send_timing
+  changeType  String   // weight_adjusted, threshold_changed, step_rewritten, icp_updated, fingerprint_updated
+  description String   // human-readable: "Upweighted hiring spike signal by 8 points"
+  previousValue String? // JSON: what it was before
+  newValue     String?  // JSON: what it is now
+  dataEvidence String?  // JSON: the data that drove this change
+  expectedImpact String? // AI's prediction of impact
+  weekNumber   Int?     // ISO week number for grouping
+  createdAt    DateTime @default(now())
+}
+
+// ============================================
+// BILLING & PAYMENTS (Stripe)
+// ============================================
+
+model StripeCustomer {
+  id               String   @id @default(cuid())
+  stripeCustomerId String   @unique
+  contactId        String?
+  companyId        String?
+  email            String
+  name             String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  invoices      StripeInvoice[]
+  subscriptions StripeSubscription[]
+}
+
+model StripeSubscription {
+  id                   String    @id @default(cuid())
+  stripeSubscriptionId String    @unique
+  stripeCustomerId     String
+  dealId               String?
+  clientLifecycleId    String?
+  status               String    // active, past_due, canceled, trialing, unpaid
+  priceId              String?
+  amount               Float
+  currency             String    @default("USD")
+  interval             String    @default("month") // month, year
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  canceledAt           DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  customer StripeCustomer @relation(fields: [stripeCustomerId], references: [stripeCustomerId])
+}
+
+model StripeInvoice {
+  id               String    @id @default(cuid())
+  stripeInvoiceId  String    @unique
+  stripeCustomerId String
+  dealId           String?
+  subscriptionId   String?
+  status           String    // draft, open, paid, void, uncollectible
+  amount           Float
+  currency         String    @default("USD")
+  description      String?
+  dueDate          DateTime?
+  paidAt           DateTime?
+  hostedUrl        String?   // Stripe hosted invoice page
+  pdfUrl           String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  customer StripeCustomer @relation(fields: [stripeCustomerId], references: [stripeCustomerId])
+}
+
+// ============================================
+// DOCUMENT SIGNING (PandaDocs)
+// ============================================
+
+model PandaDocument {
+  id               String    @id @default(cuid())
+  pandaDocId       String    @unique
+  dealId           String?
+  contactId        String?
+  name             String
+  status           String    @default("document.draft") // document.draft, document.sent, document.viewed, document.completed, document.voided
+  templateId       String?   // PandaDocs template used
+  amount           Float?    // total value from pricing table
+  sentAt           DateTime?
+  viewedAt         DateTime?
+  completedAt      DateTime?
+  expiresAt        DateTime?
+  downloadUrl      String?
+  metadata         String?   // JSON: recipients, fields, etc.
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+}
+
+// ============================================
+// WEBSITE TRACKING (First-Party Pixel)
+// ============================================
+
+model PageView {
+  id          String   @id @default(cuid())
+  visitorId   String   // anonymous cookie ID
+  contactId   String?  // resolved on form fill / email match
+  url         String
+  path        String   // /pricing, /about, etc.
+  referrer    String?
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmTerm     String?
+  utmContent  String?
+  userAgent   String?
+  ipAddress   String?
+  sessionId   String?  // groups page views into sessions
+  duration    Int?     // seconds on page (sent on next navigation)
+  createdAt   DateTime @default(now())
+
+  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([visitorId])
+  @@index([contactId])
+  @@index([path])
+  @@index([sessionId])
+  @@index([createdAt])
+}
+
+// Maps anonymous visitor cookies to contacts once identified
+model VisitorIdentity {
+  id          String   @id @default(cuid())
+  visitorId   String   @unique // the anonymous cookie value
+  contactId   String
+  identifiedAt DateTime @default(now())
+  identifiedBy String   // form_fill, chat, booking, email_click
+}
+
+// Site API key for authenticating inbound endpoints
+model SiteApiKey {
+  id          String   @id @default(cuid())
+  name        String   // "Production site", "Staging"
+  keyHash     String   @unique // hashed API key
+  keyPrefix   String   // first 8 chars for display (sk_live_xxxx...)
+  isActive    Boolean  @default(true)
+  lastUsedAt  DateTime?
+  createdAt   DateTime @default(now())
+}
+
+// ============================================
+// REPORTING
+// ============================================
+
+model Dashboard {
+  id        String   @id @default(cuid())
+  name      String
+  layout    String   // JSON grid layout
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  widgets DashboardWidget[]
+}
+
+model DashboardWidget {
+  id          String @id @default(cuid())
+  dashboardId String
+  type        String // chart, kpi, table, funnel
+  title       String
+  config      String // JSON
+  position    String // JSON
+
+  dashboard Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+}
+
+model SavedReport {
+  id        String   @id @default(cuid())
+  name      String
+  type      String   // single_object, cross_object, attribution
+  config    String   // JSON
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SavedView {
+  id        String   @id @default(cuid())
+  name      String
+  object    String
+  filters   String   // JSON
+  columns   String   // JSON
+  sortBy    String?
+  sortDir   String   @default("desc")
+  isDefault Boolean  @default(false)
+  userId    String?
+  createdAt DateTime @default(now())
+}
+
+// ============================================
+// CONTENT ENGINE & KNOWLEDGE ENGINE
+// ============================================
+
+model VoiceProfile {
+  id               String   @id @default(cuid())
+  version          Int      @default(1)
+  isActive         Boolean  @default(true)
+  characteristics  String   // JSON: sentence patterns, vocabulary, formality level, signature phrases
+  sampleContent    String?  // JSON: array of sample texts used to build this profile
+  performanceScore Float?   // How well content using this profile converts
+  lastUpdated      DateTime @default(now())
+  createdAt        DateTime @default(now())
+}
+
+model KnowledgeSource {
+  id               String   @id @default(cuid())
+  url              String
+  type             String   // rss, scrape, g2_reviews, product_updates, industry_news
+  tier             String   @default("tier3") // tier1 (own data), tier2 (industry), tier3 (general)
+  isActive         Boolean  @default(true)
+  lastFetchedAt    DateTime?
+  fetchFrequency   String   @default("weekly") // daily, weekly, monthly
+  reliabilityScore Float    @default(0.5) // 0-1, how useful insights from this source have been
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  rawEntries KnowledgeRaw[]
+}
+
+model KnowledgeRaw {
+  id          String   @id @default(cuid())
+  sourceId    String
+  content     String   // Raw scraped/fetched content
+  title       String?
+  url         String?  // Specific page URL if different from source
+  fetchedAt   DateTime @default(now())
+  processed   Boolean  @default(false)
+  processedAt DateTime?
+
+  source   KnowledgeSource  @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  insights KnowledgeInsight[]
+}
+
+model KnowledgeInsight {
+  id                       String   @id @default(cuid())
+  rawId                    String?
+  tactic                   String   // The specific tactic or insight extracted
+  claimedResult            String?  // What the source claims this achieves
+  channel                  String?  // email, linkedin, blog, newsletter, general
+  audience                 String?  // Who this applies to
+  confidence               Float    @default(0.5) // 0-1 confidence in the insight
+  internalValidationScore  Float?   // How well this insight performed when we used it
+  validationPoints         Int      @default(0) // Number of times validated against internal data
+  isValidated              Boolean  @default(false)
+  tags                     String?  // JSON array of topic tags
+  createdAt                DateTime @default(now())
+
+  raw    KnowledgeRaw?  @relation(fields: [rawId], references: [id])
+  usages InsightUsage[]
+}
+
+model InsightUsage {
+  id                     String   @id @default(cuid())
+  insightId              String
+  contentDraftId         String?
+  usageContext           String?  // newsletter, blog, linkedin, sequence_rewrite
+  outcome                String?  // positive, neutral, negative
+  validationPointsAwarded Int     @default(0)
+  createdAt              DateTime @default(now())
+
+  insight KnowledgeInsight @relation(fields: [insightId], references: [id], onDelete: Cascade)
+  draft   ContentDraft?    @relation(fields: [contentDraftId], references: [id])
+}
+
+model ContentCalendar {
+  id           String   @id @default(cuid())
+  weekStarting DateTime // Monday of the target week
+  channel      String   // newsletter, blog, linkedin, twitter
+  topic        String
+  angle        String   // The specific angle derived from pipeline intelligence
+  sourceInsight String? // What pipeline/knowledge data drove this topic
+  status       String   @default("planned") // planned, drafted, scheduled, published, skipped
+  scheduledAt  DateTime?
+  priority     Int      @default(0) // Higher = more important
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  drafts ContentDraft[]
+
+  @@index([weekStarting])
+  @@index([channel])
+  @@index([status])
+}
+
+model ContentDraft {
+  id           String   @id @default(cuid())
+  calendarId   String?
+  channel      String   // newsletter, blog, linkedin, twitter
+  title        String?
+  body         String   // The generated content
+  voiceScore   Float?   // 0-1 how well it matches the VoiceProfile
+  status       String   @default("draft") // draft, review, approved, scheduled, published, rejected
+  publishAt    DateTime?
+  publishedAt  DateTime?
+  publishedUrl String?  // URL where it was published (blog post URL, LinkedIn post URL)
+  metadata     String?  // JSON: channel-specific metadata (newsletter subject line, blog slug, etc.)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  calendar    ContentCalendar? @relation(fields: [calendarId], references: [id])
+  performance ContentPerformance?
+  usages      InsightUsage[]
+
+  @@index([calendarId])
+  @@index([channel])
+  @@index([status])
+  @@index([publishAt])
+  @@index([createdAt])
+}
+
+model ContentPerformance {
+  id                      String   @id @default(cuid())
+  draftId                 String   @unique
+  channel                 String
+  opens                   Int      @default(0) // Newsletter opens
+  clicks                  Int      @default(0) // Link clicks
+  replies                 Int      @default(0) // Direct replies (newsletter/linkedin)
+  views                   Int      @default(0) // Blog page views
+  shares                  Int      @default(0) // Social shares
+  comments                Int      @default(0) // LinkedIn/blog comments
+  engagementRate          Float?   // Composite engagement metric
+  pipelineEntriesGenerated Int     @default(0) // Leads generated from this content
+  revenueInfluenced       Float?   // Deal value influenced by this content
+  icpMatchRate            Float?   // % of engagers who match ICP
+  measuredAt              DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  draft ContentDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@index([channel])
+  @@index([measuredAt])
+}
+
+model NewsletterSubscriber {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  contactId       String?  // Link to CRM contact if identified
+  subscribedAt    DateTime @default(now())
+  unsubscribedAt  DateTime?
+  isActive        Boolean  @default(true)
+  openRate        Float?   // Running average
+  clickRate       Float?   // Running average
+  lastEngagement  DateTime?
+  totalOpens      Int      @default(0)
+  totalClicks     Int      @default(0)
+  leadScoreImpact Int      @default(0) // Points added to contact's score from newsletter engagement
+  tags            String?  // JSON array of interest tags based on click behavior
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([contactId])
+  @@index([isActive])
+}
