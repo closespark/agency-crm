@@ -52,6 +52,12 @@ export async function processSequenceQueue(): Promise<number> {
 
   for (const enrollment of due) {
     try {
+      // Skip if contact has a domain handoff in progress (Issue 17: cold→warm race)
+      if (enrollment.contact.handoffInProgress) {
+        console.log(`[autopilot] Skipping step for ${enrollment.contactId} — handoff in progress`);
+        continue;
+      }
+
       const steps = safeParseJSON(enrollment.sequence.steps, []) as Array<{
         stepNumber: number;
         channel: string;
@@ -70,6 +76,13 @@ export async function processSequenceQueue(): Promise<number> {
           where: { id: enrollment.id },
           data: { status: "completed", completedAt: new Date() },
         });
+        // Handle sequence completion decision (re-enroll, Vapi, or disqualify)
+        try {
+          const { handleSequenceCompletion } = await import("./bant-recovery");
+          await handleSequenceCompletion(enrollment.id);
+        } catch (err) {
+          console.error(`[autopilot] Sequence completion handler failed for ${enrollment.id}:`, err);
+        }
         continue;
       }
 
@@ -87,6 +100,8 @@ export async function processSequenceQueue(): Promise<number> {
           intel,
           sequenceName: enrollment.sequence.name,
           sequenceStrategy: enrollment.sequence.description || "",
+          sequenceType: enrollment.sequence.type,
+          enrollmentMetadata: safeParseJSON<Record<string, unknown>>(enrollment.metadata, {}),
         });
         personalized = copy;
       } else {
@@ -120,8 +135,17 @@ export async function processSequenceQueue(): Promise<number> {
       // Determine sending route based on contact's domain tier
       const enrolledContact = await prisma.contact.findUnique({
         where: { id: enrollment.contactId },
-        select: { email: true, domainTier: true },
+        select: { email: true, domainTier: true, globalOptOut: true },
       });
+
+      // Respect global opt-out (CAN-SPAM/GDPR compliance)
+      if (enrolledContact?.globalOptOut) {
+        await prisma.sequenceEnrollment.update({
+          where: { id: enrollment.id },
+          data: { status: "unsubscribed" },
+        });
+        continue;
+      }
 
       let gmailMeta: { gmailMessageId?: string; gmailThreadId?: string } = {};
       let vapiMeta: { vapiCallId?: string } = {};
@@ -280,6 +304,26 @@ export async function generateDailyInsights(): Promise<number> {
     console.error("Instantly campaign sync failed:", err);
   }
 
+  // === STALE FLAG CLEANUP ===
+
+  // 0d. Reset stale handoffInProgress flags (crash recovery — if flag has been true for 2+ hours
+  // and domainTier is already warm, the handoff completed but the flag wasn't cleared)
+  try {
+    const staleHandoffs = await prisma.contact.updateMany({
+      where: {
+        handoffInProgress: true,
+        domainTier: "warm",
+        updatedAt: { lte: new Date(Date.now() - 2 * 60 * 60 * 1000) },
+      },
+      data: { handoffInProgress: false },
+    });
+    if (staleHandoffs.count > 0) {
+      console.warn(`[autopilot] Reset ${staleHandoffs.count} stale handoffInProgress flags`);
+    }
+  } catch (err) {
+    console.error("Stale handoff cleanup failed:", err);
+  }
+
   // === SCORING & QUALIFICATION ===
 
   // 1. Apply score decay (25%/month behavioral, full reset at 90 days)
@@ -328,18 +372,15 @@ export async function generateDailyInsights(): Promise<number> {
       if (reengageSequence) {
         const steps = safeParseJSON(reengageSequence.steps, [] as Array<{ delayDays: number }>);
         const firstDelay = steps[0]?.delayDays || 0;
-        await prisma.sequenceEnrollment.create({
-          data: {
-            sequenceId: reengageSequence.id,
-            contactId: contact.id,
-            status: "active",
-            currentStep: 0,
-            channel: "email",
-            nextActionAt: new Date(Date.now() + firstDelay * 24 * 60 * 60 * 1000),
-            metadata: JSON.stringify({ source: "engagement_drop_reengage" }),
-          },
+        const { enrollContactInSequence } = await import("./sequence-enrollment");
+        const enrollmentId = await enrollContactInSequence({
+          sequenceId: reengageSequence.id,
+          contactId: contact.id,
+          channel: "email",
+          nextActionAt: new Date(Date.now() + firstDelay * 24 * 60 * 60 * 1000),
+          metadata: { source: "engagement_drop_reengage" },
         });
-        autoActioned = true;
+        autoActioned = !!enrollmentId;
       }
     }
 

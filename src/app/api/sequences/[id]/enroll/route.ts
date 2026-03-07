@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { enrollContactInSequence } from "@/lib/ai/sequence-enrollment";
 
 export async function POST(
   request: NextRequest,
@@ -70,65 +71,35 @@ export async function POST(
     );
   }
 
-  // Check for existing active enrollments to avoid duplicates
-  const existingEnrollments = await prisma.sequenceEnrollment.findMany({
-    where: {
-      sequenceId: id,
-      contactId: { in: contactIds },
-      status: "active",
-    },
-    select: { contactId: true },
-  });
-
-  const alreadyEnrolled = new Set(existingEnrollments.map((e) => e.contactId));
-  const newContactIds = contactIds.filter((cid) => !alreadyEnrolled.has(cid));
-
-  if (newContactIds.length === 0) {
-    return NextResponse.json(
-      { error: "All contacts are already enrolled in this sequence" },
-      { status: 400 }
-    );
-  }
-
   // Calculate first action time (first step delay)
   const firstStep = steps[0] as Record<string, unknown>;
   const delayDays = (firstStep?.delayDays as number) || 0;
   const nextActionAt = new Date();
   nextActionAt.setDate(nextActionAt.getDate() + delayDays);
 
-  // Create enrollments
-  const enrollments = await Promise.all(
-    newContactIds.map((contactId) =>
-      prisma.sequenceEnrollment.create({
-        data: {
-          sequenceId: id,
-          contactId,
-          status: "active",
-          currentStep: 0,
-          channel,
-          nextActionAt,
-          metadata: JSON.stringify({ enrolledBy: session.user.id }),
-        },
-        include: {
-          contact: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-            },
-          },
-        },
-      })
-    )
-  );
+  // Enroll through single entry point (enforces channel lock + duplicate check)
+  let enrolled = 0;
+  let skipped = 0;
+  for (const contactId of contactIds) {
+    const enrollmentId = await enrollContactInSequence({
+      sequenceId: id,
+      contactId,
+      channel,
+      nextActionAt,
+      metadata: { enrolledBy: session.user.id },
+    });
+    if (enrollmentId) {
+      enrolled++;
+    } else {
+      skipped++;
+    }
+  }
 
   return NextResponse.json(
     {
       data: {
-        enrolled: enrollments.length,
-        skipped: alreadyEnrolled.size,
-        enrollments,
+        enrolled,
+        skipped,
       },
     },
     { status: 201 }

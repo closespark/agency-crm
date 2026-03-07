@@ -8,6 +8,7 @@ import { runAIJob } from "./job-runner";
 import { queryInsights } from "./knowledge-engine";
 import { getVoiceProfile, scoreVoiceMatch } from "./voice-profile";
 import { safeParseJSON } from "@/lib/safe-json";
+import { OPTIMIZATION_THRESHOLDS } from "./optimization-thresholds";
 
 // ============================================
 // CONTENT CALENDAR GENERATION (Sunday night)
@@ -336,7 +337,7 @@ Return JSON: { subject: string, preheader: string, body: string, ctaText: string
       title: finalSubject,
       body: finalBody,
       voiceScore: finalScore,
-      status: "approved", // Always approve — autonomous system
+      status: finalScore >= 0.5 ? "approved" : "needs_review", // Block low-quality content
       publishAt: getNextTuesday7am(),
       metadata: JSON.stringify({
         subject: finalSubject,
@@ -424,7 +425,7 @@ Return JSON: {
       title: blog.title,
       body: blog.body,
       voiceScore: voiceScore.score,
-      status: "approved", // Always approve — autonomous system
+      status: voiceScore.score >= OPTIMIZATION_THRESHOLDS.CONTENT_VOICE_SCORE_THRESHOLD ? "approved" : "needs_review",
       publishAt: blogPublishAt,
       metadata: JSON.stringify({
         slug: blog.slug,
@@ -494,7 +495,7 @@ Return JSON: {
       title: post.hook.substring(0, 100),
       body: post.body,
       voiceScore: voiceScore.score,
-      status: "approved", // Always approve — autonomous system
+      status: voiceScore.score >= OPTIMIZATION_THRESHOLDS.CONTENT_VOICE_SCORE_THRESHOLD ? "approved" : "needs_review",
       publishAt: linkedinPublishAt,
       metadata: JSON.stringify({
         hook: post.hook,
@@ -873,18 +874,15 @@ export async function evaluateSubscriberForOutreach(
         const steps = safeParseJSON(warmSequence.steps, [] as Array<{ delayDays: number }>);
         const firstDelay = steps[0]?.delayDays || 0;
 
-        await prisma.sequenceEnrollment.create({
-          data: {
-            sequenceId: warmSequence.id,
-            contactId: contact.id,
-            status: "active",
-            currentStep: 0,
-            channel: "email",
-            nextActionAt: new Date(Date.now() + firstDelay * 24 * 60 * 60 * 1000),
-            metadata: JSON.stringify({ source: "newsletter_warm_lead", totalClicks: subscriber.totalClicks }),
-          },
+        const { enrollContactInSequence } = await import("./sequence-enrollment");
+        const enrollmentId = await enrollContactInSequence({
+          sequenceId: warmSequence.id,
+          contactId: contact.id,
+          channel: "email",
+          nextActionAt: new Date(Date.now() + firstDelay * 24 * 60 * 60 * 1000),
+          metadata: { source: "newsletter_warm_lead", totalClicks: subscriber.totalClicks },
         });
-        enrolled = true;
+        enrolled = !!enrollmentId;
       }
 
       // Also upgrade domain tier to warm (they came inbound via newsletter)

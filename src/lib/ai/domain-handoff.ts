@@ -44,19 +44,26 @@ export async function triggerDomainHandoff(params: {
 
   if (!contact || contact.domainTier === "warm") return null;
 
+  // Set handoff flag to prevent sequence steps from firing during transition (Issue 17)
+  await prisma.contact.update({
+    where: { id: contactId },
+    data: { handoffInProgress: true },
+  });
+
   // Find the active Instantly campaign for this contact
   const instantlyCampaign = await findInstantlyCampaign(contact.email);
 
   // Find active sequence enrollments (these are the Instantly-driven sequences)
   const activeEnrollments = contact.sequenceEnrollments;
 
-  // Step 1: Stop Instantly sequence
-  if (instantlyCampaign?.instantlyId) {
+  // Step 1: Remove this specific lead from Instantly campaign (not pause the whole campaign)
+  if (instantlyCampaign?.instantlyId && contact.email) {
     try {
-      // Remove lead from Instantly campaign (stops all further cold emails)
-      await instantly.campaigns.pause(instantlyCampaign.instantlyId);
+      await instantly.leads.delete(instantlyCampaign.instantlyId, contact.email);
     } catch (err) {
-      console.error("Failed to pause Instantly campaign during handoff:", err);
+      console.error(`Failed to remove lead ${contact.email} from Instantly campaign ${instantlyCampaign.instantlyId}:`, err);
+      // Fallback: if lead deletion isn't supported, try to at least log it
+      // Do NOT pause the entire campaign — that kills outreach for all other contacts
     }
   }
 
@@ -91,10 +98,10 @@ export async function triggerDomainHandoff(params: {
     },
   });
 
-  // Step 5: Update contact to warm tier
+  // Step 5: Update contact to warm tier + clear handoff flag
   await prisma.contact.update({
     where: { id: contactId },
-    data: { domainTier: "warm" },
+    data: { domainTier: "warm", handoffInProgress: false },
   });
 
   // Step 6: If there's a warm sequence configured, enroll them
@@ -106,26 +113,28 @@ export async function triggerDomainHandoff(params: {
   });
 
   if (warmSequence) {
-    await prisma.sequenceEnrollment.create({
-      data: {
-        sequenceId: warmSequence.id,
-        contactId,
-        status: "active",
-        channel: channel === "linkedin" ? "linkedin" : "email",
-        nextActionAt: new Date(Date.now() + 2 * 60 * 60 * 1000), // 2 hours from now
-        metadata: JSON.stringify({
-          domainHandoff: true,
-          handoffId: handoff.id,
-          triggerIntent: intent,
-          brandedDomain: BRANDED_DOMAIN(),
-        }),
+    const { enrollContactInSequence } = await import("./sequence-enrollment");
+    const enrollmentId = await enrollContactInSequence({
+      sequenceId: warmSequence.id,
+      contactId,
+      channel: channel === "linkedin" ? "linkedin" : "email",
+      nextActionAt: new Date(Date.now() + 2 * 60 * 60 * 1000), // 2 hours from now
+      metadata: {
+        domainHandoff: true,
+        handoffId: handoff.id,
+        triggerIntent: intent,
+        brandedDomain: BRANDED_DOMAIN(),
       },
     });
 
-    await prisma.domainHandoff.update({
-      where: { id: handoff.id },
-      data: { warmSequenceId: warmSequence.id },
-    });
+    if (enrollmentId) {
+      await prisma.domainHandoff.update({
+        where: { id: handoff.id },
+        data: { warmSequenceId: warmSequence.id },
+      });
+    } else {
+      console.warn(`[domain-handoff] Could not enroll ${contactId} in warm sequence — already active or opted out`);
+    }
   }
 
   // Step 7: Create insight for visibility
@@ -143,7 +152,7 @@ export async function triggerDomainHandoff(params: {
         warmSequence ? { action: `Enrolled in warm sequence: ${warmSequence.name}` } : null,
       ].filter(Boolean)),
       actionsTaken: JSON.stringify([
-        "Instantly campaign paused",
+        "Lead removed from Instantly campaign",
         "Cold sequence enrollments completed",
         "Contact domain tier updated to warm",
         "Warm touchpoint generated and queued",

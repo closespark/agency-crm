@@ -148,11 +148,15 @@ model Contact {
   bantNotes      String?  // JSON: { budget: "exact words", authority: "exact words", need: "exact words", timeline: "exact words" }
   bantScore      Int      @default(0)   // 0-4 count of confirmed BANT criteria
   bantLastUpdated DateTime?
+  bantGapSummary  String?  // comma-separated missing BANT fields, e.g. "budget, timeline"
 
   ownerId        String?
   companyId      String?
   source         String?  // instantly, inbound, referral, organic, paid
   domainTier     String   @default("cold") // cold = Instantly pre-warmed, warm = branded agency domain
+  handoffInProgress Boolean @default(false) // true during cold→warm domain handoff to prevent tick loop race
+  globalOptOut    Boolean  @default(false) // CAN-SPAM/GDPR: when true, NO outreach on ANY channel
+  optOutAt        DateTime? // when they opted out
   customFields   String?  // JSON
 
   // Scoring optimization
@@ -674,6 +678,7 @@ model Sequence {
   id          String   @id @default(cuid())
   name        String
   description String?
+  type        String   @default("outreach") // outreach, bant_qualification, nurture, re_engagement
   steps       String   // JSON array of sequence steps
   isActive    Boolean  @default(true)
   aiGenerated Boolean  @default(false) // AI wrote the sequence copy
@@ -969,7 +974,7 @@ model SequenceEnrollment {
   channel     String    @default("email") // email, linkedin, multi
   nextActionAt DateTime?
   completedAt DateTime?
-  metadata    String?   // JSON: tracking data
+  metadata    String?   // JSON: tracking data, includes bantGapSummary for bant_qualification enrollments
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -981,6 +986,7 @@ model SequenceEnrollment {
   @@index([status])
   @@index([nextActionAt])
   @@index([contactId, status, channel])
+  @@index([contactId, sequenceId, status], name: "idx_contact_sequence_status")
 }
 
 model InstantlyCampaign {

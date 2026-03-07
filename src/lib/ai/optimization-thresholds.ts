@@ -30,4 +30,8 @@ export const OPTIMIZATION_THRESHOLDS = {
 
   // BANT extractor calibration: minimum closed deals before learning patterns
   BANT_CALIBRATION_MIN_DEALS: 10,
+
+  // Content voice score: minimum voice match score to auto-approve content
+  // Start permissive (0.4), tighten as voice calibration data accumulates
+  CONTENT_VOICE_SCORE_THRESHOLD: 0.4,
 } as const;

@@ -1,619 +1,420 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { PageHeader } from "@/components/shared/page-header";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs } from "@/components/ui/tabs";
-import { AutopilotStats } from "@/components/ai/autopilot-stats";
-import { AIActivityFeed } from "@/components/ai/ai-activity-feed";
-import { InsightCard } from "@/components/ai/insight-card";
+import { Button } from "@/components/ui/button";
 import { Spinner, PageLoader } from "@/components/ui/loading";
-import { Select } from "@/components/ui/select";
-import { Pagination } from "@/components/ui/pagination";
-import { formatDateTime, formatCurrency } from "@/lib/utils";
+import { formatDateTime, formatCurrency, parseJSON } from "@/lib/utils";
 import {
   Brain,
   Play,
   Pause,
-  Users,
-  TrendingUp,
+  Send,
+  AlertTriangle,
+  XCircle,
+  CheckCircle,
   Zap,
-  Lightbulb,
-  RefreshCw,
+  MessageSquare,
+  Clock,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
-interface Stats {
-  contactsScored: number;
-  repliesAnalyzed: number;
-  dealsAnalyzed: number;
-  insightsGenerated: number;
-  sequenceStepsExecuted: number;
-  meetingsBooked: number;
-}
+// ── Types ──
 
-interface InsightData {
+interface InsightEntry {
   id: string;
   type: string;
   title: string;
   description: string;
   priority: string;
-  resourceType: string;
-  resourceId: string;
-  actionItems: string | null;
   status: string;
   createdAt: string;
 }
 
-interface ConvLogEntry {
+interface ErrorEntry {
   id: string;
-  contactId: string | null;
-  dealId: string | null;
-  channel: string;
-  direction: string;
-  rawContent: string;
-  aiSummary: string | null;
-  sentiment: string | null;
-  intent: string | null;
-  actionTaken: boolean;
+  type: string;
+  error: string | null;
+  agentName: string;
   createdAt: string;
 }
 
-export default function AICommandCenterPage() {
-  const [stats, setStats] = useState<Stats | null>(null);
+interface ChangelogEntry {
+  id: string;
+  category: string;
+  changeType: string;
+  description: string;
+  expectedImpact: string | null;
+  createdAt: string;
+}
+
+interface DashboardData {
+  autopilot: { isActive: boolean; lastChangedAt: string | null };
+  insights: InsightEntry[];
+  errors: ErrorEntry[];
+  changelog: ChangelogEntry[];
+  stats: {
+    totalContacts: number;
+    activeDeals: number;
+    pipelineValue: number;
+    activeEnrollments: number;
+    failedJobs7d: number;
+  };
+}
+
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+const priorityColors: Record<string, string> = {
+  critical: "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300",
+  high: "bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300",
+  medium: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300",
+  low: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
+};
+
+const categoryColors: Record<string, string> = {
+  icp: "bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300",
+  scoring: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300",
+  sequence: "bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300",
+  stage_gate: "bg-teal-100 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300",
+  bant: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300",
+  client_health: "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300",
+  send_timing: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300",
+};
+
+// ── Main Component ──
+
+export default function AICommandCenter() {
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [autopilotActive, setAutopilotActive] = useState(true);
   const [togglingAutopilot, setTogglingAutopilot] = useState(false);
-  const [runningAction, setRunningAction] = useState<string | null>(null);
 
-  // Insights tab state
-  const [insights, setInsights] = useState<InsightData[]>([]);
-  const [insightsPage, setInsightsPage] = useState(1);
-  const [insightsTotalPages, setInsightsTotalPages] = useState(1);
-  const [insightsType, setInsightsType] = useState("");
-  const [insightsStatus, setInsightsStatus] = useState("");
+  // Chat state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Conversation log tab state
-  const [convLogs, setConvLogs] = useState<ConvLogEntry[]>([]);
-  const [convPage, setConvPage] = useState(1);
-  const [convTotalPages, setConvTotalPages] = useState(1);
-  const [convChannel, setConvChannel] = useState("");
-  const [convSentiment, setConvSentiment] = useState("");
+  // Expandable sections
+  const [errorsExpanded, setErrorsExpanded] = useState(true);
+  const [changelogExpanded, setChangelogExpanded] = useState(false);
 
-  const fetchAutopilotStatus = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const res = await fetch("/api/ai/autopilot");
-      const data = await res.json();
-      if (data.data) setAutopilotActive(data.data.isActive);
-    } catch {
-      // Default to active on error
-    }
-  }, []);
-
-  const toggleAutopilot = useCallback(async () => {
-    setTogglingAutopilot(true);
-    try {
-      const res = await fetch("/api/ai/autopilot", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active: !autopilotActive }),
-      });
-      const data = await res.json();
-      if (data.data) setAutopilotActive(data.data.isActive);
-    } finally {
-      setTogglingAutopilot(false);
-    }
-  }, [autopilotActive]);
-
-  const fetchStats = useCallback(async () => {
-    try {
-      const res = await fetch("/api/ai/stats");
-      const data = await res.json();
-      setStats(data.data);
+      const res = await fetch("/api/ai/command-center");
+      const json = await res.json();
+      setData(json.data);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const fetchInsights = useCallback(async () => {
-    const params = new URLSearchParams({
-      page: insightsPage.toString(),
-      pageSize: "10",
-      ...(insightsType && { type: insightsType }),
-      ...(insightsStatus && { status: insightsStatus }),
-    });
-    const res = await fetch(`/api/ai/insights?${params}`);
-    const data = await res.json();
-    setInsights(data.data || []);
-    setInsightsTotalPages(data.meta?.totalPages || 1);
-  }, [insightsPage, insightsType, insightsStatus]);
-
-  const fetchConvLogs = useCallback(async () => {
-    const params = new URLSearchParams({
-      page: convPage.toString(),
-      pageSize: "15",
-      ...(convChannel && { channel: convChannel }),
-      ...(convSentiment && { sentiment: convSentiment }),
-    });
-    const res = await fetch(`/api/ai/conversation-log?${params}`);
-    const data = await res.json();
-    setConvLogs(data.data || []);
-    setConvTotalPages(data.meta?.totalPages || 1);
-  }, [convPage, convChannel, convSentiment]);
+  useEffect(() => {
+    fetchData();
+    // Auto-refresh every 60 seconds
+    const interval = setInterval(fetchData, 60_000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
 
   useEffect(() => {
-    fetchAutopilotStatus();
-    fetchStats();
-  }, [fetchAutopilotStatus, fetchStats]);
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
 
-  useEffect(() => {
-    fetchInsights();
-  }, [fetchInsights]);
-
-  useEffect(() => {
-    fetchConvLogs();
-  }, [fetchConvLogs]);
-
-  async function runAction(action: string) {
-    setRunningAction(action);
+  const toggleAutopilot = useCallback(async () => {
+    if (!data) return;
+    setTogglingAutopilot(true);
     try {
-      const res = await fetch("/api/ai/run", {
+      const res = await fetch("/api/ai/autopilot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ active: !data.autopilot.isActive }),
       });
-      const data = await res.json();
-      if (data.data?.stats) {
-        setStats(data.data.stats);
+      const json = await res.json();
+      if (json.data) {
+        setData((prev) =>
+          prev ? { ...prev, autopilot: { isActive: json.data.isActive, lastChangedAt: new Date().toISOString() } } : prev
+        );
       }
-      fetchInsights();
     } finally {
-      setRunningAction(null);
+      setTogglingAutopilot(false);
     }
+  }, [data]);
+
+  const sendChat = useCallback(async () => {
+    if (!chatInput.trim() || chatLoading) return;
+    const message = chatInput.trim();
+    setChatInput("");
+    setChatMessages((prev) => [...prev, { role: "user", content: message }]);
+    setChatLoading(true);
+
+    try {
+      const res = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message,
+          history: chatMessages.slice(-10),
+        }),
+      });
+      const json = await res.json();
+      setChatMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: json.response || json.error || "No response" },
+      ]);
+    } catch {
+      setChatMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Failed to reach the AI agent. Check the server logs." },
+      ]);
+    } finally {
+      setChatLoading(false);
+      inputRef.current?.focus();
+    }
+  }, [chatInput, chatLoading, chatMessages]);
+
+  if (loading) return <PageLoader />;
+
+  if (!data) {
+    return (
+      <div className="py-12 text-center text-sm text-zinc-500">
+        Failed to load command center data.
+      </div>
+    );
   }
-
-  async function handleInsightStatus(id: string, status: string) {
-    await fetch(`/api/ai/insights/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    fetchInsights();
-  }
-
-  const insightTypeOptions = [
-    { value: "", label: "All Types" },
-    { value: "deal_risk", label: "Deal Risk" },
-    { value: "upsell_opportunity", label: "Upsell Opportunity" },
-    { value: "churn_warning", label: "Churn Warning" },
-    { value: "engagement_drop", label: "Engagement Drop" },
-    { value: "hot_lead", label: "Hot Lead" },
-    { value: "meeting_suggestion", label: "Meeting Suggestion" },
-  ];
-
-  const insightStatusOptions = [
-    { value: "", label: "All Statuses" },
-    { value: "new", label: "New" },
-    { value: "acknowledged", label: "Acknowledged" },
-    { value: "acted_on", label: "Acted On" },
-    { value: "dismissed", label: "Dismissed" },
-  ];
-
-  const sentimentOptions = [
-    { value: "", label: "All Sentiment" },
-    { value: "positive", label: "Positive" },
-    { value: "neutral", label: "Neutral" },
-    { value: "negative", label: "Negative" },
-    { value: "urgent", label: "Urgent" },
-  ];
-
-  const channelOptions = [
-    { value: "", label: "All Channels" },
-    { value: "email", label: "Email" },
-    { value: "linkedin", label: "LinkedIn" },
-    { value: "chat", label: "Chat" },
-  ];
-
-  const sentimentColor: Record<string, string> = {
-    positive: "success",
-    neutral: "secondary",
-    negative: "danger",
-    urgent: "warning",
-  };
 
   return (
-    <div className="space-y-6">
-      {/* Hero Section */}
-      <div className="rounded-xl border border-zinc-200 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 p-6 dark:border-zinc-800 dark:from-blue-950/30 dark:via-indigo-950/30 dark:to-purple-950/30">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="rounded-xl bg-blue-600 p-3 text-white">
-              <Brain size={28} />
+    <div className="flex h-[calc(100vh-3.5rem)] gap-4 overflow-hidden">
+      {/* Left Column: Insights + Errors + Changelog */}
+      <div className="flex w-1/2 flex-col gap-4 overflow-y-auto pr-2">
+        {/* Header bar */}
+        <div className="flex items-center justify-between rounded-xl border border-zinc-200 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 px-5 py-4 dark:border-zinc-800 dark:from-blue-950/30 dark:via-indigo-950/30 dark:to-purple-950/30">
+          <div className="flex items-center gap-3">
+            <div className="rounded-lg bg-blue-600 p-2 text-white">
+              <Brain size={22} />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-                AI Command Center
+              <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
+                Command Center
               </h1>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                Autopilot engine status and controls -- Last 30 days
-              </p>
+              <div className="flex items-center gap-3 text-xs text-zinc-500">
+                <span>{data.stats.totalContacts} contacts</span>
+                <span>{data.stats.activeDeals} deals ({formatCurrency(data.stats.pipelineValue)})</span>
+                <span>{data.stats.activeEnrollments} in sequences</span>
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <div
-                className={`h-2.5 w-2.5 rounded-full ${
-                  autopilotActive ? "bg-green-500 animate-pulse" : "bg-zinc-400"
-                }`}
-              />
-              <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                {autopilotActive ? "Autopilot Active" : "Autopilot Paused"}
-              </span>
-            </div>
+          <div className="flex items-center gap-2">
+            <div className={`h-2 w-2 rounded-full ${data.autopilot.isActive ? "bg-green-500 animate-pulse" : "bg-zinc-400"}`} />
             <Button
-              variant={autopilotActive ? "outline" : "default"}
+              size="sm"
+              variant={data.autopilot.isActive ? "outline" : "default"}
               onClick={toggleAutopilot}
               disabled={togglingAutopilot}
             >
-              {togglingAutopilot ? (
-                <Spinner size="sm" />
-              ) : autopilotActive ? (
-                <Pause size={16} />
-              ) : (
-                <Play size={16} />
-              )}
-              {autopilotActive ? "Pause" : "Activate"}
+              {togglingAutopilot ? <Spinner size="sm" /> : data.autopilot.isActive ? <Pause size={14} /> : <Play size={14} />}
+              {data.autopilot.isActive ? "Pause" : "Activate"}
             </Button>
           </div>
         </div>
+
+        {/* Errors section */}
+        {data.errors.length > 0 && (
+          <Card className="border-red-200 dark:border-red-900/50">
+            <CardHeader className="cursor-pointer pb-2" onClick={() => setErrorsExpanded(!errorsExpanded)}>
+              <CardTitle className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-2">
+                  <AlertTriangle size={16} className="text-red-500" />
+                  Errors ({data.errors.length})
+                </span>
+                {errorsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </CardTitle>
+            </CardHeader>
+            {errorsExpanded && (
+              <CardContent className="space-y-2 pt-0">
+                {data.errors.map((err) => (
+                  <div key={err.id} className="flex items-start gap-2 rounded-md bg-red-50 p-2 text-xs dark:bg-red-950/20">
+                    <XCircle size={14} className="mt-0.5 shrink-0 text-red-500" />
+                    <div className="min-w-0 flex-1">
+                      <span className="font-medium text-zinc-900 dark:text-zinc-100">{err.agentName}</span>
+                      <span className="ml-1 text-zinc-500">{err.type}</span>
+                      {err.error && (
+                        <p className="mt-0.5 text-red-600 dark:text-red-400">{err.error.slice(0, 200)}</p>
+                      )}
+                      <p className="mt-0.5 text-zinc-400">{formatDateTime(err.createdAt)}</p>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            )}
+          </Card>
+        )}
+
+        {/* AI Insights feed */}
+        <Card className="flex-1">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Zap size={16} className="text-blue-500" />
+              AI Insights
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {data.insights.length === 0 ? (
+              <p className="py-4 text-center text-xs text-zinc-400">No recent insights</p>
+            ) : (
+              data.insights.map((insight) => (
+                <div key={insight.id} className="rounded-md border p-2.5 dark:border-zinc-800">
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium ${priorityColors[insight.priority] || priorityColors.medium}`}>
+                      {insight.priority}
+                    </span>
+                    <Badge variant="secondary" className="text-[10px]">{insight.type.replace(/_/g, " ")}</Badge>
+                    {insight.status === "auto_actioned" && (
+                      <CheckCircle size={12} className="text-green-500" />
+                    )}
+                  </div>
+                  <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">{insight.title}</p>
+                  <p className="mt-0.5 text-xs text-zinc-500">{insight.description.slice(0, 200)}</p>
+                  <p className="mt-0.5 text-[10px] text-zinc-400">{formatDateTime(insight.createdAt)}</p>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        {/* System Changelog */}
+        <Card>
+          <CardHeader className="cursor-pointer pb-2" onClick={() => setChangelogExpanded(!changelogExpanded)}>
+            <CardTitle className="flex items-center justify-between text-sm">
+              <span className="flex items-center gap-2">
+                <Clock size={16} className="text-zinc-400" />
+                System Changelog ({data.changelog.length})
+              </span>
+              {changelogExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </CardTitle>
+          </CardHeader>
+          {changelogExpanded && (
+            <CardContent className="space-y-2 pt-0">
+              {data.changelog.map((entry) => (
+                <div key={entry.id} className="flex items-start gap-2 text-xs">
+                  <div className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium ${categoryColors[entry.category] || "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"}`}>
+                        {entry.category}
+                      </span>
+                      <Badge variant="secondary" className="text-[10px]">{entry.changeType}</Badge>
+                    </div>
+                    <p className="mt-0.5 text-zinc-700 dark:text-zinc-300">{entry.description}</p>
+                    {entry.expectedImpact && (
+                      <p className="text-zinc-400">Expected: {entry.expectedImpact}</p>
+                    )}
+                    <p className="text-[10px] text-zinc-400">{formatDateTime(entry.createdAt)}</p>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          )}
+        </Card>
       </div>
 
-      {/* Stats Row */}
-      <AutopilotStats stats={stats} loading={loading} />
-
-      {/* Run Now Buttons */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Run Now</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-3">
-            {[
-              { action: "score_contacts", label: "Score All Contacts", icon: Users },
-              { action: "scan_deals", label: "Scan Deals", icon: TrendingUp },
-              { action: "process_sequences", label: "Process Sequences", icon: Zap },
-              { action: "generate_insights", label: "Generate Insights", icon: Lightbulb },
-            ].map((item) => {
-              const Icon = item.icon;
-              const isRunning = runningAction === item.action;
-              return (
-                <Button
-                  key={item.action}
-                  variant="outline"
-                  disabled={!!runningAction || !autopilotActive}
-                  onClick={() => runAction(item.action)}
-                >
-                  {isRunning ? (
-                    <Spinner size="sm" />
-                  ) : (
-                    <Icon size={16} />
-                  )}
-                  {item.label}
-                </Button>
-              );
-            })}
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setLoading(true);
-                fetchStats();
-              }}
-            >
-              <RefreshCw size={16} />
-              Refresh
-            </Button>
+      {/* Right Column: Chat Agent */}
+      <div className="flex w-1/2 flex-col rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+        {/* Chat header */}
+        <div className="flex items-center gap-3 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <div className="rounded-lg bg-indigo-100 p-1.5 text-indigo-600 dark:bg-indigo-900/50">
+            <MessageSquare size={16} />
           </div>
-        </CardContent>
-      </Card>
+          <div>
+            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">System Agent</p>
+            <p className="text-[10px] text-zinc-400">Query tables, debug errors, inspect contacts</p>
+          </div>
+        </div>
 
-      {/* Tabs */}
-      <Tabs
-        tabs={[
-          {
-            id: "insights",
-            label: "Insights",
-            content: (
-              <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <Select
-                    options={insightTypeOptions}
-                    value={insightsType}
-                    onChange={(e) => {
-                      setInsightsType(e.target.value);
-                      setInsightsPage(1);
-                    }}
-                    className="w-48"
-                  />
-                  <Select
-                    options={insightStatusOptions}
-                    value={insightsStatus}
-                    onChange={(e) => {
-                      setInsightsStatus(e.target.value);
-                      setInsightsPage(1);
-                    }}
-                    className="w-48"
-                  />
-                </div>
-                {insights.length === 0 ? (
-                  <p className="py-8 text-center text-sm text-zinc-500">
-                    No insights found
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {insights.map((insight) => (
-                      <InsightCard
-                        key={insight.id}
-                        insight={insight}
-                        onUpdateStatus={handleInsightStatus}
-                      />
-                    ))}
-                  </div>
-                )}
-                <Pagination
-                  page={insightsPage}
-                  totalPages={insightsTotalPages}
-                  onPageChange={setInsightsPage}
-                />
-              </div>
-            ),
-          },
-          {
-            id: "jobs",
-            label: "Jobs",
-            content: <JobsTabContent />,
-          },
-          {
-            id: "agents",
-            label: "Agents",
-            content: <AgentsTabContent />,
-          },
-          {
-            id: "conversation-log",
-            label: "Conversation Log",
-            content: (
-              <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <Select
-                    options={channelOptions}
-                    value={convChannel}
-                    onChange={(e) => {
-                      setConvChannel(e.target.value);
-                      setConvPage(1);
-                    }}
-                    className="w-40"
-                  />
-                  <Select
-                    options={sentimentOptions}
-                    value={convSentiment}
-                    onChange={(e) => {
-                      setConvSentiment(e.target.value);
-                      setConvPage(1);
-                    }}
-                    className="w-40"
-                  />
-                </div>
-                {convLogs.length === 0 ? (
-                  <p className="py-8 text-center text-sm text-zinc-500">
-                    No conversation logs found
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {convLogs.map((log) => (
-                      <Card key={log.id}>
-                        <CardContent className="p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <Badge variant="secondary">{log.channel}</Badge>
-                                <Badge variant={log.direction === "inbound" ? "default" : "outline"}>
-                                  {log.direction}
-                                </Badge>
-                                {log.sentiment && (
-                                  <Badge variant={(sentimentColor[log.sentiment] ?? "secondary") as "success" | "secondary" | "danger" | "warning"}>
-                                    {log.sentiment}
-                                  </Badge>
-                                )}
-                                {log.intent && (
-                                  <Badge variant="outline">{log.intent}</Badge>
-                                )}
-                              </div>
-                              {log.aiSummary && (
-                                <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                                  {log.aiSummary}
-                                </p>
-                              )}
-                              <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-400">
-                                {log.rawContent}
-                              </p>
-                            </div>
-                            <span className="shrink-0 text-xs text-zinc-400">
-                              {formatDateTime(log.createdAt)}
-                            </span>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-                <Pagination
-                  page={convPage}
-                  totalPages={convTotalPages}
-                  onPageChange={setConvPage}
-                />
-              </div>
-            ),
-          },
-        ]}
-      />
-    </div>
-  );
-}
-
-// Inline sub-components for the embedded tabs
-
-function JobsTabContent() {
-  const [jobs, setJobs] = useState<Array<{
-    id: string;
-    type: string;
-    status: string;
-    tokens: number | null;
-    cost: number | null;
-    createdAt: string;
-    startedAt: string | null;
-    completedAt: string | null;
-    agent: { id: string; name: string };
-  }>>([]);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [summary, setSummary] = useState({ totalJobs: 0, totalTokens: 0, totalCost: 0 });
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    fetch(`/api/ai/jobs?page=${page}&pageSize=10`)
-      .then((r) => r.json())
-      .then((res) => {
-        setJobs(res.data || []);
-        setTotalPages(res.meta?.totalPages || 1);
-        if (res.summary) setSummary(res.summary);
-      })
-      .finally(() => setLoading(false));
-  }, [page]);
-
-  if (loading) return <PageLoader />;
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold">{summary.totalJobs.toLocaleString()}</p>
-            <p className="text-xs text-zinc-500">Total Jobs (30d)</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold">{summary.totalTokens.toLocaleString()}</p>
-            <p className="text-xs text-zinc-500">Total Tokens (30d)</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold">{formatCurrency(summary.totalCost)}</p>
-            <p className="text-xs text-zinc-500">Total Cost (30d)</p>
-          </CardContent>
-        </Card>
-      </div>
-      <div className="text-right">
-        <a href="/ai/jobs" className="text-sm text-blue-600 hover:underline">
-          View all jobs &rarr;
-        </a>
-      </div>
-      {jobs.length === 0 ? (
-        <p className="py-8 text-center text-sm text-zinc-500">No jobs found</p>
-      ) : (
-        <div className="space-y-2">
-          {jobs.map((job) => (
-            <Card key={job.id}>
-              <CardContent className="flex items-center justify-between p-3">
-                <div className="flex items-center gap-3">
-                  <Badge
-                    variant={
-                      job.status === "completed" ? "success" :
-                      job.status === "failed" ? "danger" :
-                      job.status === "running" ? "warning" : "secondary"
-                    }
+        {/* Messages */}
+        <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+          {chatMessages.length === 0 && (
+            <div className="flex h-full flex-col items-center justify-center text-center">
+              <Brain size={32} className="text-zinc-300 dark:text-zinc-600" />
+              <p className="mt-3 text-sm font-medium text-zinc-500">Ask me anything about the system</p>
+              <div className="mt-3 space-y-1.5">
+                {[
+                  "Show me all MQL contacts stuck without BANT",
+                  "What errors happened this week?",
+                  "Which sequences have the best reply rates?",
+                  "Show contacts with high fit score but no deal",
+                  "What did autopilot do last night?",
+                ].map((q) => (
+                  <button
+                    key={q}
+                    onClick={() => { setChatInput(q); inputRef.current?.focus(); }}
+                    className="block w-full rounded-lg border border-zinc-200 px-3 py-1.5 text-left text-xs text-zinc-600 transition-colors hover:border-blue-300 hover:bg-blue-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:bg-blue-950/20"
                   >
-                    {job.status}
-                  </Badge>
-                  <div>
-                    <span className="text-sm font-medium">{job.agent.name}</span>
-                    <span className="mx-2 text-zinc-300">|</span>
-                    <span className="text-sm text-zinc-500">{job.type}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4 text-xs text-zinc-500">
-                  {job.tokens && <span>{job.tokens.toLocaleString()} tokens</span>}
-                  {job.cost != null && <span>{formatCurrency(job.cost)}</span>}
-                  <span>{formatDateTime(job.createdAt)}</span>
-                </div>
-              </CardContent>
-            </Card>
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {chatMessages.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                  msg.role === "user"
+                    ? "bg-blue-600 text-white"
+                    : "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+                }`}
+              >
+                <div className="whitespace-pre-wrap">{msg.content}</div>
+              </div>
+            </div>
           ))}
+
+          {chatLoading && (
+            <div className="flex justify-start">
+              <div className="flex items-center gap-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-500 dark:bg-zinc-800">
+                <Loader2 size={14} className="animate-spin" />
+                Querying system...
+              </div>
+            </div>
+          )}
+
+          <div ref={chatEndRef} />
         </div>
-      )}
-      <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
-    </div>
-  );
-}
 
-function AgentsTabContent() {
-  const [agents, setAgents] = useState<Array<{
-    id: string;
-    name: string;
-    description: string | null;
-    model: string;
-    temperature: number;
-    isActive: boolean;
-    _count: { jobs: number };
-  }>>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch("/api/ai/agents")
-      .then((r) => r.json())
-      .then((res) => setAgents(res.data || []))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <PageLoader />;
-
-  return (
-    <div className="space-y-4">
-      <div className="text-right">
-        <a href="/ai/agents" className="text-sm text-blue-600 hover:underline">
-          Manage agents &rarr;
-        </a>
+        {/* Input */}
+        <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
+          <div className="flex items-end gap-2">
+            <textarea
+              ref={inputRef}
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendChat();
+                }
+              }}
+              placeholder="Ask about contacts, deals, errors, sequences..."
+              rows={1}
+              className="flex-1 resize-none rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none dark:border-zinc-700 dark:text-zinc-100"
+            />
+            <Button
+              size="sm"
+              onClick={sendChat}
+              disabled={!chatInput.trim() || chatLoading}
+            >
+              <Send size={14} />
+            </Button>
+          </div>
+        </div>
       </div>
-      {agents.length === 0 ? (
-        <p className="py-8 text-center text-sm text-zinc-500">No agents configured</p>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {agents.map((agent) => (
-            <Card key={agent.id} className={!agent.isActive ? "opacity-60" : ""}>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-medium text-zinc-900 dark:text-zinc-100">
-                    {agent.name}
-                  </h3>
-                  <Badge variant={agent.isActive ? "success" : "secondary"}>
-                    {agent.isActive ? "Active" : "Inactive"}
-                  </Badge>
-                </div>
-                <p className="mt-1 text-sm text-zinc-500">
-                  {agent.description || "No description"}
-                </p>
-                <div className="mt-2 flex items-center gap-3 text-xs text-zinc-400">
-                  <span>{agent.model}</span>
-                  <span>Temp: {agent.temperature}</span>
-                  <span>{agent._count.jobs} jobs</span>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

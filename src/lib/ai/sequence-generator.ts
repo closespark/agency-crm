@@ -86,6 +86,7 @@ export interface ContactIntelligence {
   jobTitle: string | null;
   lifecycleStage: string;
   leadStatus: string | null;
+  stageHistory: { from: string; to: string; triggeredBy: string; reason: string; timestamp: string }[] | null;
 
   // Scoring
   fitScore: number;
@@ -98,6 +99,7 @@ export interface ContactIntelligence {
     authority: string | null;
     need: string | null;
     timeline: string | null;
+    gapSummary: string | null;
     notes: Record<string, string> | null; // verbatim quotes
     score: number;
   };
@@ -124,7 +126,7 @@ export interface ContactIntelligence {
     date: string;
   }[];
 
-  // Email engagement
+  // Email engagement (last 30 days)
   engagement: {
     sent: number;
     opened: number;
@@ -139,35 +141,67 @@ export interface ContactIntelligence {
     content: string;
     sentAt: string;
   }[];
+
+  // Active deal if any
+  deal: {
+    stage: string;
+    amount: number | null;
+    painPoints: string | null;
+    scopeOfWork: string | null;
+  } | null;
+
+  // ICP context — what "good" looks like
+  icp: {
+    industries: string | null;
+    companySizes: string | null;
+    jobTitles: string | null;
+    revenueRanges: string | null;
+    avgDealSize: number | null;
+    avgTimeToClose: number | null;
+  } | null;
 }
 
 /**
  * Gather all available intelligence about a contact for AI copy generation.
+ * Pulls: contact profile, company, BANT, conversations, email events, deal, ICP.
  */
 export async function gatherContactIntelligence(
   contactId: string,
   sequenceId?: string
 ): Promise<ContactIntelligence> {
-  const contact = await prisma.contact.findUnique({
-    where: { id: contactId },
-    include: {
-      company: true,
-      aiConversationLogs: {
-        orderBy: { createdAt: "desc" },
-        take: 20,
+  // Parallel fetch: contact+relations, active deal, active ICP, email events (30d)
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  const [contact, activeDeal, activeICP, recentEmailEvents] = await Promise.all([
+    prisma.contact.findUnique({
+      where: { id: contactId },
+      include: {
+        company: true,
+        aiConversationLogs: {
+          orderBy: { createdAt: "desc" },
+          take: 5,
+        },
       },
-      emailEvents: {
-        orderBy: { createdAt: "desc" },
-        take: 50,
-      },
-    },
-  });
+    }),
+    prisma.deal.findFirst({
+      where: { contactId, stage: { notIn: ["closed_won", "closed_lost"] } },
+      select: { stage: true, amount: true, painPoints: true, scopeOfWork: true },
+    }),
+    prisma.iCPProfile.findFirst({
+      where: { isActive: true },
+      select: { industries: true, companySizes: true, jobTitles: true, revenueRanges: true, avgDealSize: true, avgTimeToClose: true },
+    }),
+    prisma.emailEvent.findMany({
+      where: { contactId, createdAt: { gte: thirtyDaysAgo } },
+      select: { type: true },
+    }),
+  ]);
 
   if (!contact) throw new Error(`Contact ${contactId} not found`);
 
-  // Count email engagement events
+  // Count email engagement events (last 30 days only)
   const engagement = { sent: 0, opened: 0, clicked: 0, replied: 0 };
-  for (const event of contact.emailEvents) {
+  for (const event of recentEmailEvents) {
     if (event.type === "sent") engagement.sent++;
     else if (event.type === "opened") engagement.opened++;
     else if (event.type === "clicked") engagement.clicked++;
@@ -198,6 +232,7 @@ export async function gatherContactIntelligence(
   }
 
   const bantNotes = safeParseJSON(contact.bantNotes, null);
+  const stageHistory = safeParseJSON(contact.stageHistory, null);
 
   return {
     firstName: contact.firstName,
@@ -206,6 +241,7 @@ export async function gatherContactIntelligence(
     jobTitle: contact.jobTitle,
     lifecycleStage: contact.lifecycleStage,
     leadStatus: contact.leadStatus,
+    stageHistory,
 
     fitScore: contact.fitScore,
     engagementScore: contact.engagementScore,
@@ -216,6 +252,7 @@ export async function gatherContactIntelligence(
       authority: contact.bantAuthority,
       need: contact.bantNeed,
       timeline: contact.bantTimeline,
+      gapSummary: contact.bantGapSummary,
       notes: bantNotes,
       score: contact.bantScore,
     },
@@ -244,6 +281,19 @@ export async function gatherContactIntelligence(
 
     engagement,
     previousSteps,
+
+    deal: activeDeal,
+
+    icp: activeICP
+      ? {
+          industries: activeICP.industries,
+          companySizes: activeICP.companySizes,
+          jobTitles: activeICP.jobTitles,
+          revenueRanges: activeICP.revenueRanges,
+          avgDealSize: activeICP.avgDealSize,
+          avgTimeToClose: activeICP.avgTimeToClose,
+        }
+      : null,
   };
 }
 
@@ -254,111 +304,157 @@ export async function gatherContactIntelligence(
 /**
  * Generate email/message copy from scratch using contact intelligence + step strategy.
  * This is called at send time, NOT at sequence creation time.
+ * Every field from the contact record, company, deal, conversations, and ICP
+ * is injected into the prompt so the output reads like it was written by
+ * someone who knows this person — because the AI does.
  */
 export async function generateStepCopy(params: {
   step: SequenceStep;
   intel: ContactIntelligence;
   sequenceName: string;
   sequenceStrategy: string;
+  sequenceType?: string;
+  enrollmentMetadata?: Record<string, unknown>;
 }): Promise<{ subject: string; body: string }> {
-  const { step, intel, sequenceName, sequenceStrategy } = params;
+  const { step, intel, sequenceName, sequenceStrategy, sequenceType, enrollmentMetadata } = params;
 
-  // Build a rich context prompt
-  const hasConversations = intel.conversations.length > 0;
-  const hasBANT = intel.bant.score > 0;
+  // ---- Build context blocks ----
+
   const inboundConvos = intel.conversations.filter((c) => c.direction === "inbound");
-  const discoveryNotes = inboundConvos
-    .map((c) => `[${c.channel}] ${c.summary || c.content}`)
+  const allConvos = intel.conversations
+    .map((c) => `[${c.date.split("T")[0]} ${c.direction} ${c.channel}] ${c.summary || c.content.substring(0, 300)}${c.sentiment ? ` (sentiment: ${c.sentiment})` : ""}${c.intent ? ` (intent: ${c.intent})` : ""}${c.objectionVerbatim ? ` — objection verbatim: "${c.objectionVerbatim}"` : ""}`)
     .join("\n");
 
-  const bantContext = hasBANT
+  const bantLines = [
+    intel.bant.budget ? `Budget: ${intel.bant.budget}` : "Budget: UNKNOWN",
+    intel.bant.authority ? `Authority: ${intel.bant.authority}` : "Authority: UNKNOWN",
+    intel.bant.need ? `Need: ${intel.bant.need}` : "Need: UNKNOWN",
+    intel.bant.timeline ? `Timeline: ${intel.bant.timeline}` : "Timeline: UNKNOWN",
+    intel.bant.gapSummary ? `Missing fields: ${intel.bant.gapSummary}` : null,
+    intel.bant.notes ? `Verbatim quotes from contact: ${JSON.stringify(intel.bant.notes)}` : null,
+  ].filter(Boolean).join("\n");
+
+  const companyBlock = intel.company
     ? [
-        intel.bant.budget ? `Budget: ${intel.bant.budget}` : null,
-        intel.bant.authority ? `Authority: ${intel.bant.authority}` : null,
-        intel.bant.need ? `Need: ${intel.bant.need}` : null,
-        intel.bant.timeline ? `Timeline: ${intel.bant.timeline}` : null,
-        intel.bant.notes
-          ? `Verbatim quotes: ${JSON.stringify(intel.bant.notes)}`
-          : null,
-      ]
-        .filter(Boolean)
-        .join("\n")
-    : "No BANT data yet — this is a cold contact.";
+        `Company: ${intel.company.name}`,
+        intel.company.industry ? `Industry: ${intel.company.industry}` : null,
+        intel.company.size ? `Size: ${intel.company.size} employees` : null,
+        intel.company.revenue ? `Revenue: $${(intel.company.revenue / 1_000_000).toFixed(1)}M` : null,
+        intel.company.description ? `About: ${intel.company.description}` : null,
+      ].filter(Boolean).join("\n")
+    : "No company data.";
 
-  const companyContext = intel.company
-    ? `Company: ${intel.company.name}${intel.company.industry ? `, ${intel.company.industry}` : ""}${intel.company.size ? `, ${intel.company.size} employees` : ""}${intel.company.revenue ? `, $${(intel.company.revenue / 1000000).toFixed(1)}M revenue` : ""}${intel.company.description ? `\nAbout: ${intel.company.description}` : ""}`
-    : "No company data available.";
+  const dealBlock = intel.deal
+    ? [
+        `Deal stage: ${intel.deal.stage}`,
+        intel.deal.amount ? `Deal size: $${intel.deal.amount.toLocaleString()}` : null,
+        intel.deal.painPoints ? `Pain points: ${intel.deal.painPoints}` : null,
+        intel.deal.scopeOfWork ? `Scope of work: ${intel.deal.scopeOfWork}` : null,
+      ].filter(Boolean).join("\n")
+    : null;
 
-  const engagementContext = `Emails sent: ${intel.engagement.sent}, Opened: ${intel.engagement.opened}, Clicked: ${intel.engagement.clicked}, Replied: ${intel.engagement.replied}`;
+  const stageHistoryBlock = intel.stageHistory
+    ? intel.stageHistory.slice(-3).map((h) => `${h.from} → ${h.to} (${h.triggeredBy}: ${h.reason})`).join("\n")
+    : null;
 
-  const previousStepsSent = intel.previousSteps.length > 0
+  const previousStepsBlock = intel.previousSteps.length > 0
     ? intel.previousSteps
-        .map((s) => `Step ${s.stepNumber} (${s.channel}, ${s.sentAt.split("T")[0]}): ${s.content.substring(0, 200)}...`)
+        .map((s) => `Step ${s.stepNumber} (${s.channel}, ${s.sentAt.split("T")[0]}): ${s.content.substring(0, 300)}`)
         .join("\n")
-    : "No previous steps sent yet — this is the first touch.";
+    : null;
 
-  const input = {
-    task: "Write a hyper-personalized outreach message",
-    step: {
-      number: step.stepNumber,
-      channel: step.channel,
-      angle: step.angle,
-      goal: step.goal,
-      objectionToAddress: step.objectionToAddress,
-      tone: step.tone,
-    },
-    sequence: { name: sequenceName, strategy: sequenceStrategy },
-    contact: {
-      name: `${intel.firstName} ${intel.lastName}`,
-      jobTitle: intel.jobTitle,
-      lifecycleStage: intel.lifecycleStage,
-      leadStatus: intel.leadStatus,
-      fitScore: intel.fitScore,
-      engagementScore: intel.engagementScore,
-    },
-    instructions: `You are writing step ${step.stepNumber} of the "${sequenceName}" sequence for ${intel.firstName} ${intel.lastName}.
+  const icpBlock = intel.icp
+    ? [
+        intel.icp.industries ? `Target industries: ${intel.icp.industries}` : null,
+        intel.icp.companySizes ? `Target company sizes: ${intel.icp.companySizes}` : null,
+        intel.icp.jobTitles ? `Target titles: ${intel.icp.jobTitles}` : null,
+        intel.icp.avgDealSize ? `Avg deal size: $${intel.icp.avgDealSize.toLocaleString()}` : null,
+        intel.icp.avgTimeToClose ? `Avg time to close: ${intel.icp.avgTimeToClose} days` : null,
+      ].filter(Boolean).join("\n")
+    : null;
 
-CONTACT INTELLIGENCE:
-${companyContext}
+  // ---- Sequence-type-specific mission blocks ----
 
-BANT QUALIFICATION:
-${bantContext}
+  let missionBlock = "";
 
-DISCOVERY CALL / CONVERSATION HISTORY:
-${discoveryNotes || "No conversation history — cold outreach."}
+  if (sequenceType === "bant_qualification") {
+    const gaps = (enrollmentMetadata?.bantGapSummary as string) || intel.bant.gapSummary || "";
+    const firstGap = gaps.split(",")[0]?.trim();
+    const gapStrategies: Record<string, string> = {
+      budget: "Frame around ROI or investment range for similar projects in their industry. Example: 'Companies your size typically invest $X-Y for this kind of outcome — does that range feel realistic for what you're seeing?'",
+      authority: "Ask who else would weigh in. Example: 'If this looked like a fit, who else on your side would want to evaluate it?'",
+      need: "Probe deeper on the specific pain point using what you know. Example: 'When you mentioned [specific thing], how is that affecting [specific business outcome]?'",
+      timeline: "Tie to a business event or deadline. Example: 'Is there a specific event or quarter driving this, or is it more exploratory right now?'",
+    };
 
-EMAIL ENGAGEMENT:
-${engagementContext}
+    missionBlock = `
+BANT GAP RECOVERY MISSION (PRIMARY OBJECTIVE):
+This contact is stuck at MQL because they are missing: ${gaps}.
+Your email must ask EXACTLY ONE natural question targeting: ${firstGap}.
+Strategy for ${firstGap}: ${gapStrategies[firstGap] || `Extract ${firstGap} information through a consultative question.`}
+Do NOT ask multiple qualifying questions. One question, woven naturally into the email.
+Do NOT sound like a qualification form. Sound like a consultant following up on a real conversation.`;
+  }
 
-PREVIOUS SEQUENCE STEPS ALREADY SENT:
-${previousStepsSent}
+  if (sequenceType === "re_engagement") {
+    const lastConvo = intel.conversations[0];
+    const lastIntent = lastConvo?.intent;
+    const lastDate = lastConvo?.date?.split("T")[0];
+    missionBlock = `
+RE-ENGAGEMENT MISSION:
+This contact went quiet. ${lastConvo ? `Last touchpoint was ${lastDate} on ${lastConvo.channel} — intent was "${lastIntent}", sentiment was "${lastConvo.sentiment}".` : "No recent touchpoints on record."}
+${lastConvo?.summary ? `Last conversation summary: ${lastConvo.summary}` : ""}
+Reference the specific last interaction if available. Do NOT write "just checking in" — provide a reason to re-engage (new insight, case study result, industry change).`;
+  }
 
-STEP STRATEGY:
-- Angle: ${step.angle}
-- Goal: ${step.goal}
-${step.objectionToAddress ? `- Objection to address: ${step.objectionToAddress}` : ""}
-${step.tone ? `- Tone: ${step.tone}` : ""}
+  // ---- Assemble the full prompt ----
 
-RULES:
-1. Write like someone who was in the room. Reference SPECIFIC details from their conversations, BANT data, and company context. Use their exact words when possible.
-2. NEVER use generic phrases like "I know competing priorities can push initiatives to the back burner" — ALWAYS tie to their specific situation.
-3. If you have discovery call data, reference specific pain points, numbers, and quotes they shared.
-4. If this is cold outreach (no conversation history), use company data and ICP signals to demonstrate research.
-5. Do NOT repeat angles or content from previous steps already sent.
-6. Keep emails concise — 3-5 short paragraphs max. No walls of text.
-7. End with a specific, low-friction CTA aligned with the step's goal.
-8. Subject line should be specific and curiosity-driven, NOT generic.
-9. Sign off as the sender — do not include {{placeholders}} anywhere.
+  const prompt = `You are writing step ${step.stepNumber} of the "${sequenceName}" sequence.
+Recipient: ${intel.firstName} ${intel.lastName}${intel.jobTitle ? `, ${intel.jobTitle}` : ""}
+Lifecycle: ${intel.lifecycleStage} | Lead status: ${intel.leadStatus || "n/a"} | Fit: ${intel.fitScore}/55 | Engagement: ${intel.engagementScore}/45
 
-Return JSON: { "subject": "...", "body": "..." }
-The body should be plain text (no HTML). Use line breaks for paragraphs.`,
-  };
+=== COMPANY ===
+${companyBlock}
+
+=== BANT QUALIFICATION (${intel.bant.score}/4 filled) ===
+${bantLines}
+
+=== CONVERSATION HISTORY (most recent first) ===
+${allConvos || "No conversation history — this is a cold contact."}
+
+=== EMAIL ENGAGEMENT (last 30 days) ===
+Sent: ${intel.engagement.sent} | Opened: ${intel.engagement.opened} | Clicked: ${intel.engagement.clicked} | Replied: ${intel.engagement.replied}
+${intel.engagement.opened > 0 && intel.engagement.replied === 0 ? "⚠ They are opening but not replying — your subject lines work but the body isn't compelling enough to respond to." : ""}
+${intel.engagement.sent > 3 && intel.engagement.opened === 0 ? "⚠ They are not opening — try a radically different subject line approach." : ""}
+
+${dealBlock ? `=== ACTIVE DEAL ===\n${dealBlock}\n` : ""}${stageHistoryBlock ? `=== STAGE PROGRESSION ===\n${stageHistoryBlock}\n` : ""}${previousStepsBlock ? `=== PREVIOUS STEPS ALREADY SENT (do NOT repeat these angles) ===\n${previousStepsBlock}\n` : "=== FIRST TOUCH — no previous steps sent ===\n"}${icpBlock ? `=== ICP CONTEXT (what a good customer looks like) ===\n${icpBlock}\n` : ""}
+=== THIS STEP'S STRATEGY ===
+Sequence: ${sequenceName}
+Overall strategy: ${sequenceStrategy}
+Step ${step.stepNumber} angle: ${step.angle}
+Step ${step.stepNumber} goal: ${step.goal}
+${step.objectionToAddress ? `Objection to preempt: ${step.objectionToAddress}` : ""}
+${step.tone ? `Tone: ${step.tone}` : ""}
+${missionBlock}
+=== ABSOLUTE RULES ===
+1. UNDER 150 WORDS for the email body. Short paragraphs. No walls of text.
+2. If a contact field is null, empty, or marked UNKNOWN above, do NOT reference it, invent a plausible value, or leave a placeholder. Write around it. A missing company means you do not mention their company — you focus on their role or pain point instead. A missing bantNeed means you ask an indirect question to surface it, not "I see your need is unknown." NEVER output {{anything}}, "[Company]", "your organization", or any other placeholder. If you don't have the data, don't reference the concept.
+3. Subject line must be SPECIFIC to this person's situation. Banned: "Quick follow-up", "Checking in", "Just wanted to", "Hope you're well", "Following up", "Touching base". Use their company name, a specific pain point, or a specific result.
+4. Write the actual name "${intel.firstName}" — NEVER use {{firstName}} or any merge tag syntax.
+5. Reference SPECIFIC details you know: their company, their pain points, their quotes, their industry. If you have verbatim quotes from the contact, weave one in naturally. Only reference what is provided above — do not assume or fabricate context.
+6. If previous steps were sent, do NOT repeat those angles or phrasings. Each step must feel like a new thought.
+7. End with a SINGLE soft CTA that requires a one-sentence reply. Not "book a call" or "schedule a meeting" — something like "Does that match what you're seeing?" or "Worth exploring, or off base?"
+8. Sign off with a first name only (use "${process.env.BRANDED_FROM_NAME || "the sender"}"). No title, no company tagline, no "Best regards".
+9. Plain text only. No HTML, no bullet points, no bold. Write like a human typing a quick email.
+10. Do NOT start with "Hi ${intel.firstName}," — vary the opener. Sometimes use just the name, sometimes jump straight into the point.
+
+Return JSON: { "subject": "...", "body": "..." }`;
 
   const result = await runAIJob(
     "email_composer",
     "generate_step_copy",
-    input,
-    { contactId: undefined } // no contactId needed in job metadata
+    { instructions: prompt },
+    { contactId: undefined }
   );
 
   return result.output as { subject: string; body: string };

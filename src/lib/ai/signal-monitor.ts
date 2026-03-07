@@ -183,43 +183,33 @@ async function executeSignalAction(
   if (!contactId) return;
 
   switch (autoAction.type) {
-    case "re_engage":
+    case "re_engage": {
       // Bump lead score and create a re-engagement task
+      const { incrementContactScore } = await import("@/lib/score-utils");
+      await incrementContactScore(contactId, 20);
       await prisma.contact.update({
         where: { id: contactId },
-        data: {
-          engagementScore: { increment: 20 },
-          leadScore: { increment: 20 },
-          leadStatus: "new",
-          scoreDirty: true,
-        },
+        data: { leadStatus: "new" },
       });
       break;
+    }
 
     case "enroll_sequence":
       if (autoAction.config.sequenceId) {
-        await prisma.sequenceEnrollment.create({
-          data: {
-            sequenceId: autoAction.config.sequenceId as string,
-            contactId,
-            status: "active",
-            nextActionAt: new Date(),
-            metadata: JSON.stringify({ triggeredBy: signal.signalType, outreachAngle: signal.outreachAngle }),
-          },
+        const { enrollContactInSequence } = await import("./sequence-enrollment");
+        await enrollContactInSequence({
+          sequenceId: autoAction.config.sequenceId as string,
+          contactId,
+          metadata: { triggeredBy: signal.signalType, outreachAngle: signal.outreachAngle },
         });
       }
       break;
 
-    case "update_score":
-      await prisma.contact.update({
-        where: { id: contactId },
-        data: {
-          engagementScore: { increment: autoAction.config.delta as number || 15 },
-          leadScore: { increment: autoAction.config.delta as number || 15 },
-          scoreDirty: true,
-        },
-      });
+    case "update_score": {
+      const { incrementContactScore: incScore } = await import("@/lib/score-utils");
+      await incScore(contactId, (autoAction.config.delta as number) || 15);
       break;
+    }
   }
 }
 

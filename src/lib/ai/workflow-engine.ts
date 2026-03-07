@@ -249,24 +249,11 @@ export async function executeAction(
       const contactId = context.contactId;
       if (!contactId || !config.sequenceId) return;
 
-      const existing = await prisma.sequenceEnrollment.findFirst({
-        where: {
-          sequenceId: config.sequenceId,
-          contactId,
-          status: { in: ["active", "paused"] },
-        },
+      const { enrollContactInSequence } = await import("./sequence-enrollment");
+      await enrollContactInSequence({
+        sequenceId: config.sequenceId,
+        contactId,
       });
-
-      if (!existing) {
-        await prisma.sequenceEnrollment.create({
-          data: {
-            sequenceId: config.sequenceId,
-            contactId,
-            status: "active",
-            currentStep: 0,
-          },
-        });
-      }
       break;
     }
 

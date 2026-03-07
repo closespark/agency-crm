@@ -150,8 +150,26 @@ export async function analyzeReply(
   if (contactId) {
     try {
       await extractBANT(content, contactId, channel);
+
+      // Any reply with BANT data could unlock the mql→sql gate — always re-check
+      // Covers: bant_qualification sequences, Vapi calls, organic replies, any channel
+      const { recheckBantAfterReply } = await import("./bant-recovery");
+      await recheckBantAfterReply(contactId);
     } catch (err) {
       console.error(`BANT extraction failed for contact ${contactId}:`, err);
+    }
+  }
+
+  // Mark active sequence enrollments as "replied" — prevents completion handler from treating as no-reply
+  // Must run AFTER bant re-check which queries for active enrollments
+  if (contactId) {
+    try {
+      await prisma.sequenceEnrollment.updateMany({
+        where: { contactId, status: "active" },
+        data: { status: "replied" },
+      });
+    } catch (err) {
+      console.error(`Sequence enrollment reply-mark failed for contact ${contactId}:`, err);
     }
   }
 
@@ -385,22 +403,13 @@ async function executeAutoAction(
       break;
     case "enroll_sequence":
       if (contactId && action.config.sequenceId) {
-        // Check if already enrolled
-        const existingEnrollment = await prisma.sequenceEnrollment.findFirst({
-          where: { contactId, status: "active" },
+        const { enrollContactInSequence } = await import("./sequence-enrollment");
+        await enrollContactInSequence({
+          sequenceId: action.config.sequenceId as string,
+          contactId,
+          channel: (action.config.channel as string) || "email",
+          nextActionAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // start tomorrow
         });
-        if (!existingEnrollment) {
-          await prisma.sequenceEnrollment.create({
-            data: {
-              sequenceId: action.config.sequenceId as string,
-              contactId,
-              status: "active",
-              channel: (action.config.channel as string) || "email",
-              currentStep: 0,
-              nextActionAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // start tomorrow
-            },
-          });
-        }
       }
       break;
     case "escalate_channel":

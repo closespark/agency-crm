@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard,
   Users,
   KanbanSquare,
   Settings,
@@ -23,8 +22,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "AI Autopilot", href: "/ai", icon: Brain },
+  { label: "Command Center", href: "/ai", icon: Brain },
   { label: "Pipeline", href: "/pipeline", icon: KanbanSquare },
   { label: "Contacts", href: "/contacts", icon: Users },
   { label: "Integrations", href: "/integrations", icon: Plug },
@@ -44,7 +42,7 @@ export function Sidebar() {
     >
       <div className="flex h-14 items-center justify-between border-b border-zinc-200 px-4 dark:border-zinc-800">
         {!collapsed && (
-          <Link href="/dashboard" className="text-lg font-bold text-blue-600">
+          <Link href="/ai" className="text-lg font-bold text-blue-600">
             AgencyCRM
           </Link>
         )}

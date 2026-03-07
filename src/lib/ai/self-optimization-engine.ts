@@ -716,35 +716,56 @@ export async function calibrateStageGates(): Promise<number> {
       }
     }
 
-    // Write immutable per-gate per-week accuracy record (NEVER update historical)
+    // Write immutable per-gate per-week accuracy record
+    // Historical weeks are NEVER updated — only the current week can be refreshed
     const total = truePositives + falsePositives;
-    await prisma.stageGateAccuracy.upsert({
+    const currentWeekNumber = getISOWeekNumber(new Date());
+    const currentYear = new Date().getFullYear();
+    const existing = await prisma.stageGateAccuracy.findUnique({
       where: {
         stageGateId_weekNumber_year: { stageGateId: gate.id, weekNumber, year },
       },
-      create: {
-        stageGateId: gate.id,
-        objectType: gate.objectType,
-        fromStage: gate.fromStage,
-        toStage: gate.toStage,
-        weekNumber,
-        year,
-        totalTransitions: transitions.length + olderTransitions.length,
-        truePositives,
-        falsePositives,
-        inconclusive,
-        accuracy: total > 0 ? truePositives / total : null,
-        confidenceThresholdAtTime: gate.confidenceThreshold,
-      },
-      // Only update current week — historical weeks are immutable
-      update: {
-        totalTransitions: transitions.length + olderTransitions.length,
-        truePositives,
-        falsePositives,
-        inconclusive,
-        accuracy: total > 0 ? truePositives / total : null,
-      },
     });
+
+    if (!existing) {
+      await prisma.stageGateAccuracy.create({
+        data: {
+          stageGateId: gate.id,
+          objectType: gate.objectType,
+          fromStage: gate.fromStage,
+          toStage: gate.toStage,
+          weekNumber,
+          year,
+          totalTransitions: transitions.length + olderTransitions.length,
+          truePositives,
+          falsePositives,
+          inconclusive,
+          accuracy: total > 0 ? truePositives / total : null,
+          confidenceThresholdAtTime: gate.confidenceThreshold,
+        },
+      });
+    } else if (weekNumber === currentWeekNumber && year === currentYear) {
+      // Only update if this is the CURRENT week — historical records are immutable
+      await prisma.stageGateAccuracy.update({
+        where: {
+          stageGateId_weekNumber_year: { stageGateId: gate.id, weekNumber, year },
+        },
+        data: {
+          totalTransitions: transitions.length + olderTransitions.length,
+          truePositives,
+          falsePositives,
+          inconclusive,
+          accuracy: total > 0 ? truePositives / total : null,
+        },
+      });
+    }
+    // else: historical record exists — do not overwrite (immutability enforced)
+    else {
+      console.warn(
+        `[StageGateAccuracy] Record already exists for gate=${gate.id} week=${weekNumber} year=${year}. ` +
+        `Skipping update — possible clock/timezone issue if this is unexpected.`
+      );
+    }
 
     // Only drift threshold if we have enough total decisions
     const allTimeAccuracy = await prisma.stageGateAccuracy.findMany({

@@ -210,26 +210,79 @@ export async function convertProspectToContact(prospectId: string): Promise<stri
 
   // Auto-enroll in first active sequence so outreach starts immediately
   try {
-    const activeSequence = await prisma.sequence.findFirst({
+    const existingSequence = await prisma.sequence.findFirst({
       where: { isActive: true },
       orderBy: { createdAt: "asc" },
     });
 
-    if (activeSequence) {
-      const { safeParseJSON } = await import("@/lib/safe-json");
-      const steps = safeParseJSON(activeSequence.steps, [] as Array<{ delayDays: number }>);
-      const firstStepDelay = steps[0]?.delayDays || 0;
+    let activeSequence: NonNullable<typeof existingSequence>;
 
-      await prisma.sequenceEnrollment.create({
-        data: {
-          sequenceId: activeSequence.id,
-          contactId: contact.id,
-          status: "active",
-          currentStep: 0,
-          channel: contact.domainTier === "warm" ? "email" : "multi",
-          nextActionAt: new Date(Date.now() + firstStepDelay * 24 * 60 * 60 * 1000),
-        },
+    // If no active sequences exist, auto-generate a default cold outreach sequence
+    if (!existingSequence) {
+      const { generateSequence, saveGeneratedSequence } = await import("./sequence-generator");
+      const generated = await generateSequence({
+        targetDescription: "Cold prospects sourced from Apollo matching our ICP",
+        agencyServices: "AI-powered automation, workflow optimization, and digital transformation",
+        channels: ["email", "linkedin"],
+        stepCount: 5,
+        tone: "professional yet conversational",
       });
+      const sequenceId = await saveGeneratedSequence(generated);
+      activeSequence = await prisma.sequence.findUniqueOrThrow({
+        where: { id: sequenceId },
+      });
+      console.log(`[prospector] No active sequences found — auto-created default: "${generated.name}" (${sequenceId})`);
+    } else {
+      activeSequence = existingSequence;
+    }
+
+    const { safeParseJSON } = await import("@/lib/safe-json");
+    const steps = safeParseJSON(activeSequence.steps, [] as Array<{ delayDays: number }>);
+    // Use near-future time (2 minutes) so the sequence starts on the next worker tick
+    const firstStepDelay = steps[0]?.delayDays || 0;
+    const nextActionAt = firstStepDelay === 0
+      ? new Date(Date.now() + 2 * 60 * 1000) // 2 minutes from now for immediate steps
+      : new Date(Date.now() + firstStepDelay * 24 * 60 * 60 * 1000);
+
+    const { enrollContactInSequence } = await import("./sequence-enrollment");
+    const enrollmentId = await enrollContactInSequence({
+      sequenceId: activeSequence.id,
+      contactId: contact.id,
+      channel: contact.domainTier === "warm" ? "email" : "multi",
+      nextActionAt,
+      metadata: { source: "prospect_conversion", prospectId },
+    });
+
+    if (enrollmentId) {
+      console.log(`[prospector] Auto-enrolled contact ${contact.id} in sequence "${activeSequence.name}"`);
+    }
+
+    // Push cold-domain contacts to Instantly for email warming
+    const contactEmail = contact.email;
+    if (contact.domainTier !== "warm" && contactEmail) {
+      try {
+        const activeCampaign = await prisma.instantlyCampaign.findFirst({
+          where: { status: "active", instantlyId: { not: null } },
+          orderBy: { createdAt: "desc" },
+        });
+
+        if (activeCampaign?.instantlyId) {
+          const { instantly } = await import("@/lib/integrations/instantly");
+          await instantly.leads.add(activeCampaign.instantlyId, [
+            {
+              email: contactEmail,
+              first_name: contact.firstName,
+              last_name: contact.lastName || undefined,
+              custom_variables: {
+                crm_contact_id: contact.id,
+              },
+            },
+          ]);
+          console.log(`[prospector] Pushed cold contact ${contact.id} to Instantly campaign ${activeCampaign.name}`);
+        }
+      } catch (instantlyErr) {
+        console.error(`[prospector] Instantly push failed for ${contact.id}:`, instantlyErr);
+      }
     }
   } catch (err) {
     console.error(`[prospector] Auto-enroll in sequence failed for ${contact.id}:`, err);

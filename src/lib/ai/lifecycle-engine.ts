@@ -10,6 +10,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { safeParseJSON } from "@/lib/safe-json";
+import { enrollInBantQualification } from "./bant-recovery";
 
 // ============================================
 // STAGE DEFINITIONS & ORDERING
@@ -164,6 +165,31 @@ export async function advanceContactStage(
       if (missing.length > 0) {
         return { success: false, error: `Missing required fields for ${toStage}: ${missing.join(", ")}` };
       }
+    }
+  }
+
+  // BANT gate: mql→sql requires bantScore >= 3 (3 of 4 BANT fields filled)
+  // This is a hardcoded business rule — cannot be bypassed by manual deal creation
+  if (currentStage === "mql" && toStage === "sql") {
+    const bantFields = [contact.bantBudget, contact.bantAuthority, contact.bantNeed, contact.bantTimeline];
+    const bantScore = bantFields.filter((f) => f !== null && f !== undefined && f !== "").length;
+    if (bantScore < 3) {
+      const missingFields = [
+        !contact.bantBudget && "budget",
+        !contact.bantAuthority && "authority",
+        !contact.bantNeed && "need",
+        !contact.bantTimeline && "timeline",
+      ].filter(Boolean).join(", ");
+
+      // Store the gap and trigger auto-recovery (fire-and-forget)
+      handleBantGateRejection(contactId, missingFields).catch((err) =>
+        console.error(`[lifecycle] BANT gap recovery failed for ${contactId}:`, err)
+      );
+
+      return {
+        success: false,
+        error: `BANT qualification requires 3/4 fields (have ${bantScore}/4). Missing: ${missingFields}`,
+      };
     }
   }
 
@@ -743,7 +769,7 @@ export async function processAutoAdvanceRules(): Promise<number> {
     where: {
       createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
       contactId: { not: null },
-      status: "scheduled",
+      status: { in: ["scheduled", "requested"] },
     },
   });
   for (const meeting of recentMeetings) {
@@ -888,4 +914,25 @@ export async function seedStageGates(): Promise<void> {
       },
     });
   }
+}
+
+// ============================================
+// BANT GATE REJECTION → AUTO-RECOVERY
+// ============================================
+
+/**
+ * When the mql→sql gate rejects, store the gap and auto-enroll in a qualifying sequence.
+ * This ensures no contact gets stuck at MQL with no follow-up action.
+ */
+async function handleBantGateRejection(contactId: string, missingFields: string): Promise<void> {
+  // 1. Store the gap on the contact
+  await prisma.contact.update({
+    where: { id: contactId },
+    data: { bantGapSummary: missingFields },
+  });
+
+  // 2. Auto-enroll in qualifying sequence (if not already in one)
+  await enrollInBantQualification(contactId, missingFields);
+
+  console.log(`[lifecycle] BANT gap recovery initiated for ${contactId}: missing ${missingFields}`);
 }

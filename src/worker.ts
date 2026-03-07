@@ -75,30 +75,36 @@ async function tick() {
 
 async function processScheduledJobs() {
   try {
-    const { pullDueJobs, releaseJobLock } = await import("./lib/redis");
+    const { pullDueJobs, completeJob, failJob } = await import("./lib/redis");
     const jobs = await pullDueJobs();
 
     for (const job of jobs) {
       try {
         console.log(`[worker] processing job: ${job.type} (${job.id})`);
         await executeJob(job.type, job.payload);
-        await releaseJobLock(job.id);
+        await completeJob(job.id);
       } catch (err) {
         console.error(`[worker] job ${job.type} (${job.id}) failed:`, err);
-        // Don't release lock — let it expire via TTL to prevent immediate re-pickup.
-        // Log to dead letter for manual inspection.
-        try {
-          await prisma.rawEventLog.create({
-            data: {
-              source: "worker_dlq",
-              eventType: `job_failed:${job.type}`,
-              rawPayload: JSON.stringify({ job, error: err instanceof Error ? err.message : String(err) }),
-              processed: false,
-              processingError: err instanceof Error ? err.message : String(err),
-            },
-          });
-        } catch {
-          // If DB write fails too, the console.error above is our fallback
+        // Re-queue with exponential backoff (up to 3 retries)
+        const requeued = await failJob(job.id);
+        if (!requeued) {
+          // Max retries exceeded — log to dead letter for manual inspection
+          console.error(`[worker] job ${job.type} (${job.id}) exceeded max retries, moving to dead letter`);
+          try {
+            await prisma.rawEventLog.create({
+              data: {
+                source: "worker_dlq",
+                eventType: `job_failed:${job.type}`,
+                rawPayload: JSON.stringify({ job, error: err instanceof Error ? err.message : String(err) }),
+                processed: false,
+                processingError: err instanceof Error ? err.message : String(err),
+              },
+            });
+          } catch {
+            // If DB write fails too, the console.error above is our fallback
+          }
+        } else {
+          console.log(`[worker] job ${job.type} (${job.id}) re-queued for retry`);
         }
       }
     }
@@ -319,15 +325,16 @@ async function maybeDailyAutopilot() {
     return;
   }
 
+  // Mark autopilot date before individual steps — each step has its own try/catch
+  // so a failure in one won't prevent the others from running.
+  lastAutopilotDate = today;
+
+  // ── Step 1: Daily insights ──────────────────────────────────────────
   try {
     const { generateDailyInsights } = await import("./lib/ai/autopilot");
     const insights = await generateDailyInsights();
     console.log(`[worker] daily autopilot complete: ${insights} insights generated`);
 
-    // Set lastAutopilotDate AFTER successful execution (not before)
-    lastAutopilotDate = today;
-
-    // Log to SystemChangelog
     await prisma.systemChangelog.create({
       data: {
         category: "autopilot",
@@ -336,150 +343,238 @@ async function maybeDailyAutopilot() {
         dataEvidence: JSON.stringify({ date: today, insightsGenerated: insights }),
       },
     });
+  } catch (err) {
+    console.error("[worker] daily insights failed:", err);
+  }
 
-    // Run autonomous prospecting (Apollo → ICP scoring → pipeline)
-    try {
-      const { runProspectingCycle } = await import("./lib/ai/icp-engine");
-      const prospecting = await runProspectingCycle();
-      console.log(`[worker] prospecting: ${prospecting.accepted} accepted, ${prospecting.rejected} rejected`);
+  // ── Step 2: Apollo prospecting cycle ────────────────────────────────
+  try {
+    const { runProspectingCycle } = await import("./lib/ai/icp-engine");
+    const prospecting = await runProspectingCycle();
+    console.log(`[worker] prospecting: ${prospecting.accepted} accepted, ${prospecting.rejected} rejected`);
+  } catch (err) {
+    console.error("[worker] prospecting cycle failed:", err);
+  }
 
-      // Auto-enrich un-enriched prospects before conversion
-      if (prospecting.accepted > 0) {
-        const unenriched = await prisma.prospect.findMany({
-          where: { status: "new", enrichedData: null },
-          orderBy: { fitScore: "desc" },
-        });
+  // ── Step 3: Auto-enrich un-enriched prospects ───────────────────────
+  try {
+    const unenriched = await prisma.prospect.findMany({
+      where: { status: "new", enrichedData: null },
+      orderBy: { fitScore: "desc" },
+    });
 
-        if (unenriched.length > 0) {
-          const { apollo } = await import("./lib/integrations/apollo");
-          let enriched = 0;
-          for (const prospect of unenriched) {
-            try {
-              let enrichedPerson = null;
-              if (prospect.email) {
-                const personResult = await apollo.enrichPerson(prospect.email);
-                enrichedPerson = personResult.person;
-              }
+    if (unenriched.length > 0) {
+      const { apollo } = await import("./lib/integrations/apollo");
+      let enriched = 0;
+      for (const prospect of unenriched) {
+        try {
+          let enrichedPerson = null;
+          if (prospect.email) {
+            const personResult = await apollo.enrichPerson(prospect.email);
+            enrichedPerson = personResult.person;
+          }
 
-              let enrichedCompany = null;
-              if (prospect.companyDomain) {
-                const companyResult = await apollo.enrichCompany(prospect.companyDomain);
-                enrichedCompany = companyResult.organization;
-              }
+          let enrichedCompany = null;
+          if (prospect.companyDomain) {
+            const companyResult = await apollo.enrichCompany(prospect.companyDomain);
+            enrichedCompany = companyResult.organization;
+          }
 
-              const enrichedData = {
-                person: enrichedPerson,
-                company: enrichedCompany,
-                enrichedAt: new Date().toISOString(),
-              };
+          const enrichedData = {
+            person: enrichedPerson,
+            company: enrichedCompany,
+            enrichedAt: new Date().toISOString(),
+          };
 
-              const updateData: Record<string, unknown> = {
-                enrichedData: JSON.stringify(enrichedData),
-                status: "verified",
-              };
+          const updateData: Record<string, unknown> = {
+            enrichedData: JSON.stringify(enrichedData),
+            status: "verified",
+          };
 
-              if (enrichedPerson) {
-                if (!prospect.email && enrichedPerson.email) updateData.email = enrichedPerson.email;
-                if (!prospect.linkedinUrl && enrichedPerson.linkedin_url) updateData.linkedinUrl = enrichedPerson.linkedin_url;
-                if (!prospect.jobTitle && enrichedPerson.title) updateData.jobTitle = enrichedPerson.title;
-              }
+          if (enrichedPerson) {
+            if (!prospect.email && enrichedPerson.email) updateData.email = enrichedPerson.email;
+            if (!prospect.linkedinUrl && enrichedPerson.linkedin_url) updateData.linkedinUrl = enrichedPerson.linkedin_url;
+            if (!prospect.jobTitle && enrichedPerson.title) updateData.jobTitle = enrichedPerson.title;
+          }
 
-              if (enrichedCompany) {
-                if (!prospect.companySize && enrichedCompany.estimated_num_employees) {
-                  const emp = enrichedCompany.estimated_num_employees;
-                  if (emp <= 10) updateData.companySize = "1-10";
-                  else if (emp <= 50) updateData.companySize = "11-50";
-                  else if (emp <= 200) updateData.companySize = "51-200";
-                  else if (emp <= 500) updateData.companySize = "201-500";
-                  else if (emp <= 1000) updateData.companySize = "501-1000";
-                  else updateData.companySize = "1001+";
-                }
-                if (!prospect.industry && enrichedCompany.industry) updateData.industry = enrichedCompany.industry;
-              }
-
-              await prisma.prospect.update({
-                where: { id: prospect.id },
-                data: updateData,
-              });
-              enriched++;
-            } catch (err) {
-              console.error(`[worker] auto-enrich prospect ${prospect.id} failed:`, err);
+          if (enrichedCompany) {
+            if (!prospect.companySize && enrichedCompany.estimated_num_employees) {
+              const emp = enrichedCompany.estimated_num_employees;
+              if (emp <= 10) updateData.companySize = "1-10";
+              else if (emp <= 50) updateData.companySize = "11-50";
+              else if (emp <= 200) updateData.companySize = "51-200";
+              else if (emp <= 500) updateData.companySize = "201-500";
+              else if (emp <= 1000) updateData.companySize = "501-1000";
+              else updateData.companySize = "1001+";
             }
+            if (!prospect.industry && enrichedCompany.industry) updateData.industry = enrichedCompany.industry;
           }
-          if (enriched > 0) {
-            console.log(`[worker] auto-enriched ${enriched} prospects`);
-          }
-        }
 
-        // Auto-convert enriched prospects to contacts (full autonomous pipeline)
-        const { convertProspectToContact } = await import("./lib/ai/prospector");
-        const readyProspects = await prisma.prospect.findMany({
-          where: { status: { in: ["new", "verified"] } },
-          orderBy: { fitScore: "desc" },
-        });
-
-        let converted = 0;
-        for (const prospect of readyProspects) {
-          try {
-            await convertProspectToContact(prospect.id);
-            converted++;
-          } catch (err) {
-            console.error(`[worker] auto-convert prospect ${prospect.id} failed:`, err);
-          }
-        }
-        if (converted > 0) {
-          console.log(`[worker] auto-converted ${converted} prospects to contacts`);
+          await prisma.prospect.update({
+            where: { id: prospect.id },
+            data: updateData,
+          });
+          enriched++;
+        } catch (err) {
+          console.error(`[worker] auto-enrich prospect ${prospect.id} failed:`, err);
         }
       }
-    } catch (err) {
-      console.error("[worker] prospecting cycle failed:", err);
-    }
-
-    // Run ICP self-optimization (only triggers after 10+ closed deals)
-    try {
-      const { optimizeICP } = await import("./lib/ai/icp-engine");
-      const optimization = await optimizeICP();
-      if (optimization.optimized) {
-        console.log(`[worker] ICP optimized: ${optimization.reason}`);
+      if (enriched > 0) {
+        console.log(`[worker] auto-enriched ${enriched} prospects`);
       }
-    } catch (err) {
-      console.error("[worker] ICP optimization failed:", err);
-    }
-
-    // Generate content drafts for any planned calendar items without drafts
-    // Calendar is generated Sunday, but drafts should be created daily as needed
-    try {
-      const { generateContentDrafts } = await import("./lib/ai/content-engine");
-      const drafted = await generateContentDrafts();
-      if (drafted > 0) {
-        console.log(`[worker] content: generated ${drafted} drafts`);
-      }
-      // Publishing is already handled in the main tick loop — no duplicate call here
-    } catch (err) {
-      console.error("[worker] content generation failed:", err);
-    }
-
-    // Fetch knowledge sources and extract insights daily (not just Sunday audit)
-    try {
-      const { fetchKnowledgeSources, extractInsights } = await import("./lib/ai/knowledge-engine");
-      const fetched = await fetchKnowledgeSources();
-      if (fetched > 0) {
-        console.log(`[worker] knowledge: fetched ${fetched} sources`);
-        const extracted = await extractInsights();
-        console.log(`[worker] knowledge: extracted ${extracted} insights`);
-      }
-    } catch (err) {
-      console.error("[worker] knowledge fetch failed:", err);
     }
   } catch (err) {
-    console.error("[worker] daily autopilot failed:", err);
-  } finally {
-    try {
-      const { releaseDistributedLock } = await import("./lib/redis");
-      await releaseDistributedLock("daily_autopilot");
-    } catch {
-      // Redis unavailable — lock will expire via TTL
+    console.error("[worker] auto-enrich failed:", err);
+  }
+
+  // ── Step 4: Auto-convert prospects to contacts ──────────────────────
+  // (convertProspectToContact also auto-enrolls new contacts in the first active sequence)
+  try {
+    const { convertProspectToContact } = await import("./lib/ai/prospector");
+    const readyProspects = await prisma.prospect.findMany({
+      where: { status: { in: ["new", "verified"] } },
+      orderBy: { fitScore: "desc" },
+    });
+
+    let converted = 0;
+    for (const prospect of readyProspects) {
+      try {
+        await convertProspectToContact(prospect.id);
+        converted++;
+      } catch (err) {
+        console.error(`[worker] auto-convert prospect ${prospect.id} failed:`, err);
+      }
     }
+    if (converted > 0) {
+      console.log(`[worker] auto-converted ${converted} prospects to contacts`);
+    }
+  } catch (err) {
+    console.error("[worker] auto-convert failed:", err);
+  }
+
+  // ── Step 5: Auto-enroll new contacts in sequences ───────────────────
+  // Catches contacts that were created outside the prospecting pipeline
+  // (e.g. manual import, form submission) and don't have any enrollment yet.
+  try {
+    const recentContacts = await prisma.contact.findMany({
+      where: {
+        lifecycleStage: "lead",
+        leadStatus: "new",
+        sequenceEnrollments: { none: {} },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+
+    if (recentContacts.length > 0) {
+      const activeSequence = await prisma.sequence.findFirst({
+        where: { isActive: true },
+        orderBy: { createdAt: "asc" },
+      });
+
+      if (activeSequence) {
+        const { safeParseJSON } = await import("./lib/safe-json");
+        const steps = safeParseJSON(activeSequence.steps, [] as Array<{ delayDays: number }>);
+        const firstStepDelay = steps[0]?.delayDays || 0;
+        const { enrollContactInSequence } = await import("./lib/ai/sequence-enrollment");
+
+        let enrolled = 0;
+        for (const contact of recentContacts) {
+          try {
+            const enrollmentId = await enrollContactInSequence({
+              sequenceId: activeSequence.id,
+              contactId: contact.id,
+              channel: contact.domainTier === "warm" ? "email" : "multi",
+              nextActionAt: new Date(Date.now() + firstStepDelay * 24 * 60 * 60 * 1000),
+            });
+            if (enrollmentId) enrolled++;
+          } catch (err) {
+            console.error(`[worker] auto-enroll contact ${contact.id} failed:`, err);
+          }
+        }
+        if (enrolled > 0) {
+          console.log(`[worker] auto-enrolled ${enrolled} new contacts in sequence "${activeSequence.name}"`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[worker] auto-enroll in sequences failed:", err);
+  }
+
+  // ── Step 6: Auto-push cold-domain contacts to Instantly ─────────────
+  try {
+    if (process.env.INSTANTLY_API_KEY) {
+      const candidates = await prisma.sequence.findMany({
+        where: {
+          isActive: true,
+          enrollments: {
+            some: {
+              status: "active",
+              contact: { domainTier: "cold" },
+              metadata: { not: { contains: "instantlyCampaignId" } },
+            },
+          },
+        },
+        select: { id: true, name: true },
+      });
+
+      if (candidates.length > 0) {
+        const { pushSequenceToInstantly } = await import("./lib/integrations/sync");
+        for (const seq of candidates) {
+          try {
+            const result = await pushSequenceToInstantly(seq.id);
+            console.log(`[worker] auto-pushed sequence "${seq.name}" to Instantly: ${result.leadsAdded} leads, campaign ${result.instantlyId}`);
+          } catch (err) {
+            console.error(`[worker] auto-push to Instantly failed for sequence ${seq.id}:`, err);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[worker] Instantly auto-push failed:", err);
+  }
+
+  // ── Step 7: ICP self-optimization (only triggers after 10+ closed deals)
+  try {
+    const { optimizeICP } = await import("./lib/ai/icp-engine");
+    const optimization = await optimizeICP();
+    if (optimization.optimized) {
+      console.log(`[worker] ICP optimized: ${optimization.reason}`);
+    }
+  } catch (err) {
+    console.error("[worker] ICP optimization failed:", err);
+  }
+
+  // ── Step 8: Generate content drafts ─────────────────────────────────
+  try {
+    const { generateContentDrafts } = await import("./lib/ai/content-engine");
+    const drafted = await generateContentDrafts();
+    if (drafted > 0) {
+      console.log(`[worker] content: generated ${drafted} drafts`);
+    }
+  } catch (err) {
+    console.error("[worker] content generation failed:", err);
+  }
+
+  // ── Step 9: Fetch knowledge sources and extract insights ────────────
+  try {
+    const { fetchKnowledgeSources, extractInsights } = await import("./lib/ai/knowledge-engine");
+    const fetched = await fetchKnowledgeSources();
+    if (fetched > 0) {
+      console.log(`[worker] knowledge: fetched ${fetched} sources`);
+      const extracted = await extractInsights();
+      console.log(`[worker] knowledge: extracted ${extracted} insights`);
+    }
+  } catch (err) {
+    console.error("[worker] knowledge fetch failed:", err);
+  }
+
+  // ── Cleanup: release distributed lock ───────────────────────────────
+  try {
+    const { releaseDistributedLock } = await import("./lib/redis");
+    await releaseDistributedLock("daily_autopilot");
+  } catch {
+    // Redis unavailable — lock will expire via TTL
   }
 }
 
