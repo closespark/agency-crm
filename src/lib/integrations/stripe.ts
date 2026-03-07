@@ -12,7 +12,25 @@ import { prisma } from "@/lib/prisma";
 // STRIPE CLIENT
 // ============================================
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
+let _stripe: Stripe | null = null;
+function getStripe(): Stripe {
+  if (!_stripe) {
+    const key = process.env.STRIPE_SECRET_KEY;
+    if (!key) throw new Error("STRIPE_SECRET_KEY is not set");
+    _stripe = new Stripe(key);
+  }
+  return _stripe;
+}
+
+// Keep `stripe` export for existing code — lazily initialized
+const stripe = new Proxy({} as Stripe, {
+  get(_, prop) {
+    if (prop === "then") return undefined;
+    const instance = getStripe();
+    const value = (instance as unknown as Record<string | symbol, unknown>)[prop];
+    return typeof value === "function" ? value.bind(instance) : value;
+  },
+});
 
 // ============================================
 // CUSTOMER MANAGEMENT

@@ -5,12 +5,23 @@ const globalForAnthropic = globalThis as unknown as {
   anthropic: Anthropic | undefined;
 };
 
-export const anthropic =
-  globalForAnthropic.anthropic ??
-  new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+function createAnthropic(): Anthropic {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error("ANTHROPIC_API_KEY is not set");
+  return new Anthropic({ apiKey: key });
+}
 
-if (process.env.NODE_ENV !== "production")
-  globalForAnthropic.anthropic = anthropic;
+export const anthropic: Anthropic = new Proxy({} as Anthropic, {
+  get(_, prop) {
+    if (prop === "then") return undefined;
+    if (!globalForAnthropic.anthropic) {
+      globalForAnthropic.anthropic = createAnthropic();
+    }
+    const instance = globalForAnthropic.anthropic;
+    const value = (instance as unknown as Record<string | symbol, unknown>)[prop];
+    return typeof value === "function" ? value.bind(instance) : value;
+  },
+});
 
 export interface AIMessage {
   role: "user" | "assistant";
