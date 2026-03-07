@@ -22,6 +22,9 @@
 [build]
 builder = "nixpacks"
 
+[build.nixpacks]
+nixPkgs = ["nodejs_22"]
+
 [deploy]
 healthcheckPath = "/api/health"
 restartPolicyType = "ON_FAILURE"
