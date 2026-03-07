@@ -304,21 +304,47 @@ Return JSON: {
     orderBy: { createdAt: "desc" },
   });
 
+  // Voice score below threshold → regenerate once with feedback, then approve regardless
+  // No content should be blocked from publishing in an autonomous system
+  let finalBody = newsletter.body;
+  let finalSubject = newsletter.subject;
+  let finalScore = voiceScore.score;
+
+  if (voiceScore.score < 0.7) {
+    try {
+      const retry = await runAIJob("email_composer", "newsletter_draft", {
+        topic, angle, sourceInsight,
+        voiceFeedback: voiceScore.feedback,
+        previousDraft: newsletter.body,
+        instructions: `Rewrite this newsletter draft to better match the voice profile. Voice feedback: ${voiceScore.feedback}. Keep the same structure and content but adjust tone/style.
+Return JSON: { subject: string, preheader: string, body: string, ctaText: string, ctaUrl: string }`,
+      });
+      const retried = retry.output as typeof newsletter;
+      const retryScore = await scoreVoiceMatch(retried.body);
+      finalBody = retried.body;
+      finalSubject = retried.subject || newsletter.subject;
+      finalScore = retryScore.score;
+    } catch {
+      // Retry failed — use original draft
+    }
+  }
+
   const draft = await prisma.contentDraft.create({
     data: {
       calendarId: calendarEntry?.id,
       channel: "newsletter",
-      title: newsletter.subject,
-      body: newsletter.body,
-      voiceScore: voiceScore.score,
-      status: voiceScore.score >= 0.7 ? "approved" : "draft",
+      title: finalSubject,
+      body: finalBody,
+      voiceScore: finalScore,
+      status: "approved", // Always approve — autonomous system
       publishAt: getNextTuesday7am(),
       metadata: JSON.stringify({
-        subject: newsletter.subject,
+        subject: finalSubject,
         preheader: newsletter.preheader,
         ctaText: newsletter.ctaText,
         ctaUrl: newsletter.ctaUrl,
         voiceFeedback: voiceScore.feedback,
+        regenerated: voiceScore.score < 0.7,
       }),
     },
   });
@@ -395,7 +421,7 @@ Return JSON: {
       title: blog.title,
       body: blog.body,
       voiceScore: voiceScore.score,
-      status: voiceScore.score >= 0.7 ? "approved" : "draft",
+      status: "approved", // Always approve — autonomous system
       metadata: JSON.stringify({
         slug: blog.slug,
         metaDescription: blog.metaDescription,
@@ -461,7 +487,7 @@ Return JSON: {
       title: post.hook.substring(0, 100),
       body: post.body,
       voiceScore: voiceScore.score,
-      status: voiceScore.score >= 0.7 ? "approved" : "draft",
+      status: "approved", // Always approve — autonomous system
       metadata: JSON.stringify({
         hook: post.hook,
         voiceFeedback: voiceScore.feedback,
@@ -669,9 +695,27 @@ async function publishBlogPost(draft: {
 async function publishLinkedInPost(draft: {
   id: string;
   body: string;
+  metadata: string | null;
 }): Promise<void> {
-  // Queue for Meet Alfred or direct LinkedIn API posting
-  // For now, we add to the Meet Alfred campaign queue if a LinkedIn publishing campaign exists
+  const meta = safeParseJSON(draft.metadata, {} as Record<string, unknown>);
+
+  // Primary: Zapier webhook → LinkedIn post
+  try {
+    const { publishLinkedInPost: zapierPost } = await import("@/lib/integrations/zapier");
+    await zapierPost({
+      body: draft.body,
+      hook: meta.hook as string | undefined,
+    });
+    console.log(`[content] LinkedIn post published via Zapier`);
+    return;
+  } catch (err) {
+    // Zapier not configured — fall back to Meet Alfred
+    if (!(err instanceof Error && err.message.includes("not configured"))) {
+      console.error("[content] Zapier LinkedIn post failed:", err);
+    }
+  }
+
+  // Fallback: Meet Alfred campaign queue
   try {
     const { meetAlfred } = await import("@/lib/integrations/meet-alfred");
     const campaigns = await meetAlfred.campaigns.list() as { id: string; name: string }[];
@@ -681,20 +725,35 @@ async function publishLinkedInPost(draft: {
 
     if (publishCampaign) {
       console.log(`[content] LinkedIn post queued to Alfred campaign: ${publishCampaign.name}`);
-    } else {
-      console.log("[content] LinkedIn post drafted — no Alfred publish campaign found. Manual posting required.");
+      return;
     }
   } catch {
-    console.log("[content] LinkedIn post drafted — Meet Alfred not configured. Manual posting required.");
+    // Alfred not configured either
   }
+
+  console.warn("[content] LinkedIn post drafted — configure ZAPIER_WEBHOOK_LINKEDIN_POST in Integrations for autonomous publishing.");
 }
 
 async function publishTwitterThread(draft: {
   id: string;
   body: string;
 }): Promise<void> {
-  // Twitter/X API integration placeholder — requires X API v2 credentials
-  console.log("[content] Twitter thread drafted — X API posting not yet configured.");
+  // Parse tweets from the body (stored as JSON array)
+  const tweets = safeParseJSON(draft.body, [draft.body]) as string[];
+
+  // Primary: Zapier webhook → Twitter/X thread
+  try {
+    const { publishTwitterThread: zapierThread } = await import("@/lib/integrations/zapier");
+    await zapierThread({ tweets });
+    console.log(`[content] Twitter thread published via Zapier (${tweets.length} tweets)`);
+    return;
+  } catch (err) {
+    if (!(err instanceof Error && err.message.includes("not configured"))) {
+      console.error("[content] Zapier Twitter post failed:", err);
+    }
+  }
+
+  console.warn("[content] Twitter thread drafted — configure ZAPIER_WEBHOOK_TWITTER_POST in Integrations for autonomous publishing.");
 }
 
 // ============================================

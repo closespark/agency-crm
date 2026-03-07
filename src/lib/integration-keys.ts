@@ -36,6 +36,11 @@ const KEY_MAP: Record<string, { integration: string; field: string; env: string 
   // Gmail / Google
   GOOGLE_CLIENT_ID: { integration: "google", field: "client_id", env: "GOOGLE_CLIENT_ID" },
   GOOGLE_CLIENT_SECRET: { integration: "google", field: "client_secret", env: "GOOGLE_CLIENT_SECRET" },
+
+  // Zapier Webhooks (LinkedIn, Twitter, generic automation)
+  ZAPIER_WEBHOOK_LINKEDIN_POST: { integration: "zapier_linkedin", field: "webhook_url", env: "ZAPIER_WEBHOOK_LINKEDIN_POST" },
+  ZAPIER_WEBHOOK_TWITTER_POST: { integration: "zapier_twitter", field: "webhook_url", env: "ZAPIER_WEBHOOK_TWITTER_POST" },
+  ZAPIER_WEBHOOK_GENERIC: { integration: "zapier_generic", field: "webhook_url", env: "ZAPIER_WEBHOOK_GENERIC" },
 };
 
 // In-memory cache to avoid DB lookups on every call (cleared on save)

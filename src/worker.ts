@@ -239,7 +239,6 @@ async function maybeDailyAutopilot() {
         const newProspects = await prisma.prospect.findMany({
           where: { status: "new" },
           orderBy: { fitScore: "desc" },
-          take: 50,
         });
 
         let converted = 0;
@@ -268,6 +267,23 @@ async function maybeDailyAutopilot() {
       }
     } catch (err) {
       console.error("[worker] ICP optimization failed:", err);
+    }
+
+    // Generate content drafts for any planned calendar items without drafts
+    // Calendar is generated Sunday, but drafts should be created daily as needed
+    try {
+      const { generateContentDrafts, publishDueContent: publishContent } = await import("./lib/ai/content-engine");
+      const drafted = await generateContentDrafts();
+      if (drafted > 0) {
+        console.log(`[worker] content: generated ${drafted} drafts`);
+      }
+      // Also publish any approved content that's due
+      const published = await publishContent();
+      if (published > 0) {
+        console.log(`[worker] content: published ${published} pieces`);
+      }
+    } catch (err) {
+      console.error("[worker] content generation failed:", err);
     }
 
     // Fetch knowledge sources and extract insights daily (not just Sunday audit)
@@ -355,6 +371,14 @@ async function start() {
     await seedVoiceProfileIfEmpty();
   } catch (err) {
     console.error("[worker] Voice profile seed failed:", err);
+  }
+
+  // Seed Stage Gates on first boot (lifecycle engine requires these for proper gating)
+  try {
+    const { seedStageGates } = await import("./lib/ai/lifecycle-engine");
+    await seedStageGates();
+  } catch (err) {
+    console.error("[worker] Stage gate seed failed:", err);
   }
 
   // Main loop

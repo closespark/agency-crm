@@ -425,6 +425,39 @@ export async function advanceDealStage(
     },
   });
 
+  // Fire workflow events for deal stage changes
+  try {
+    const { processWorkflows } = await import("./workflow-engine");
+    await processWorkflows({
+      type: "deal_stage_changed",
+      data: { dealId, contactId: deal.contactId, from: currentStage, to: toStage },
+    });
+  } catch (err) {
+    console.error(`[lifecycle] Workflow trigger failed for deal ${dealId}:`, err);
+  }
+
+  // Auto-generate PandaDocs proposal when deal reaches proposal_sent
+  if (toStage === "proposal_sent") {
+    try {
+      const { createProposalFromDeal } = await import("@/lib/integrations/pandadocs");
+      await createProposalFromDeal(dealId);
+      console.log(`[lifecycle] PandaDocs proposal auto-generated for deal ${dealId}`);
+    } catch (err) {
+      console.error(`[lifecycle] PandaDocs proposal generation failed for deal ${dealId}:`, err);
+    }
+  }
+
+  // Auto-generate PandaDocs contract when deal reaches contract_sent
+  if (toStage === "contract_sent") {
+    try {
+      const { createContractFromDeal } = await import("@/lib/integrations/pandadocs");
+      await createContractFromDeal(dealId);
+      console.log(`[lifecycle] PandaDocs contract auto-generated for deal ${dealId}`);
+    } catch (err) {
+      console.error(`[lifecycle] PandaDocs contract generation failed for deal ${dealId}:`, err);
+    }
+  }
+
   // Record conversion outcome for the self-optimization engine
   if (toStage === "closed_won" || toStage === "closed_lost") {
     try {

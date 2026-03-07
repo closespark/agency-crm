@@ -124,13 +124,12 @@ export async function processSequenceQueue(): Promise<number> {
       });
 
       let gmailMeta: { gmailMessageId?: string; gmailThreadId?: string } = {};
+      let vapiMeta: { vapiCallId?: string } = {};
 
-      let emailSent = false;
+      let stepExecuted = false;
 
       if (currentStep.channel === "email" && enrolledContact?.email) {
         if (enrolledContact.domainTier === "warm") {
-          // Warm domain → send via Gmail API (branded domain)
-          // If Gmail fails, this step fails — do NOT log as sent
           const { sendEmail } = await import("@/lib/integrations/gmail");
           const result = await sendEmail({
             to: enrolledContact.email,
@@ -138,26 +137,68 @@ export async function processSequenceQueue(): Promise<number> {
             body: personalized.body,
           });
           gmailMeta = { gmailMessageId: result.messageId, gmailThreadId: result.threadId };
-          emailSent = true;
+          stepExecuted = true;
         }
-        // Cold domain contacts: Instantly handles sending via its own campaign system.
-        // The sequence enrollment for cold contacts is managed by Instantly's scheduler,
-        // not our processSequenceQueue. If we get here for a cold contact, it means
-        // the sequence wasn't pushed to Instantly — skip this step without logging as sent.
+      } else if (currentStep.channel === "call") {
+        // Place outbound AI call via Vapi
+        try {
+          const contactForCall = await prisma.contact.findUnique({
+            where: { id: enrollment.contactId },
+            select: { phone: true, firstName: true, lastName: true, company: { select: { name: true } } },
+          });
+          if (contactForCall?.phone) {
+            const { vapi } = await import("@/lib/integrations/vapi");
+            // Find first available assistant
+            const assistants = await vapi.assistants.list();
+            const assistant = assistants[0];
+            if (assistant) {
+              const call = await vapi.calls.create({
+                assistantId: assistant.id,
+                customer: {
+                  number: contactForCall.phone,
+                  name: `${contactForCall.firstName} ${contactForCall.lastName}`,
+                },
+                assistantOverrides: {
+                  firstMessage: personalized.body.substring(0, 500),
+                  model: {
+                    systemPrompt: `You are calling ${contactForCall.firstName} ${contactForCall.lastName}${contactForCall.company?.name ? ` from ${contactForCall.company.name}` : ""}. Goal: ${currentStep.goal || "follow up on previous outreach"}. Tone: ${currentStep.tone || "professional and friendly"}.`,
+                  },
+                },
+              });
+              vapiMeta = { vapiCallId: call.id };
+              stepExecuted = true;
+            } else {
+              console.warn(`[autopilot] No Vapi assistant configured — skipping call step`);
+            }
+          } else {
+            console.warn(`[autopilot] No phone number for contact ${enrollment.contactId} — skipping call step`);
+          }
+        } catch (err) {
+          console.error(`[autopilot] Vapi call failed for ${enrollment.contactId}:`, err);
+        }
+      } else if (currentStep.channel === "linkedin") {
+        // LinkedIn steps are logged as notes — actual delivery depends on Meet Alfred or Zapier
+        stepExecuted = true;
       }
 
-      // Only log activity if the email was actually sent (or if non-email channel like LinkedIn notes)
-      if (emailSent || currentStep.channel !== "email") {
+      if (stepExecuted) {
         const adminUser = await prisma.user.findFirst({ where: { role: "admin" } });
+        const activityType = currentStep.channel === "call" ? "call" : currentStep.channel === "linkedin" ? "note" : "email";
         await prisma.activity.create({
           data: {
-            type: currentStep.channel === "linkedin" ? "note" : "email",
+            type: activityType,
             subject: personalized.subject || currentStep.subject,
             body: personalized.body,
             userId: adminUser?.id || "",
             contactId: enrollment.contactId,
           },
         });
+
+        const channelMeta = gmailMeta.gmailMessageId
+          ? JSON.stringify({ ...gmailMeta, sentVia: "gmail_api", domainTier: "warm" })
+          : vapiMeta.vapiCallId
+            ? JSON.stringify({ ...vapiMeta, sentVia: "vapi" })
+            : undefined;
 
         await prisma.aIConversationLog.create({
           data: {
@@ -166,17 +207,11 @@ export async function processSequenceQueue(): Promise<number> {
             direction: "outbound",
             rawContent: personalized.body,
             aiSummary: `Sequence step ${enrollment.currentStep + 1}: ${currentStep.channel} outreach`,
-            metadata: gmailMeta.gmailMessageId ? JSON.stringify({
-              ...gmailMeta,
-              sentVia: "gmail_api",
-              domainTier: "warm",
-            }) : undefined,
+            metadata: channelMeta,
           },
         });
       } else {
-        // Cold contact not pushed to Instantly — advance the step to prevent infinite loop,
-        // but log as skipped so the system knows this step wasn't actually delivered.
-        console.warn(`[autopilot] Sequence step ${enrollment.currentStep + 1} for ${enrollment.contactId}: skipped (cold contact not in Instantly)`);
+        console.warn(`[autopilot] Sequence step ${enrollment.currentStep + 1} for ${enrollment.contactId}: skipped (channel: ${currentStep.channel}, no delivery route)`);
       }
 
       // Lead auto-advance: outreach logged → "attempting"
@@ -259,18 +294,44 @@ export async function generateDailyInsights(): Promise<number> {
   });
 
   for (const contact of recentlyEngaged) {
+    // Auto-enroll in re-engagement sequence if not already in one
+    const activeEnrollment = await prisma.sequenceEnrollment.findFirst({
+      where: { contactId: contact.id, status: "active" },
+    });
+
+    let autoActioned = false;
+    if (!activeEnrollment) {
+      const reengageSequence = await prisma.sequence.findFirst({
+        where: { isActive: true },
+        orderBy: { createdAt: "asc" },
+      });
+      if (reengageSequence) {
+        const steps = safeParseJSON(reengageSequence.steps, [] as Array<{ delayDays: number }>);
+        const firstDelay = steps[0]?.delayDays || 0;
+        await prisma.sequenceEnrollment.create({
+          data: {
+            sequenceId: reengageSequence.id,
+            contactId: contact.id,
+            status: "active",
+            currentStep: 0,
+            channel: "email",
+            nextActionAt: new Date(Date.now() + firstDelay * 24 * 60 * 60 * 1000),
+            metadata: JSON.stringify({ source: "engagement_drop_reengage" }),
+          },
+        });
+        autoActioned = true;
+      }
+    }
+
     await prisma.aIInsight.create({
       data: {
         type: "engagement_drop",
         title: `${contact.firstName} ${contact.lastName} hasn't engaged in 14+ days`,
-        description: `Lead score: ${contact.leadScore}. No recent activity. Consider re-engagement.`,
+        description: `Lead score: ${contact.leadScore}. No recent activity. ${autoActioned ? "Auto-enrolled in re-engagement sequence." : "Already in active sequence."}`,
         priority: contact.leadScore >= 70 ? "high" : "medium",
         resourceType: "contact",
         resourceId: contact.id,
-        actionItems: JSON.stringify([
-          { action: "Send personalized re-engagement email", priority: "this_week" },
-          { action: "Check LinkedIn for recent activity", priority: "today" },
-        ]),
+        status: autoActioned ? "auto_actioned" : "new",
       },
     });
     insightCount++;
@@ -283,7 +344,7 @@ export async function generateDailyInsights(): Promise<number> {
       lifecycleStage: { in: ["mql", "sql"] },
       deals: { none: {} },
     },
-    select: { id: true, firstName: true, lastName: true, leadScore: true },
+    select: { id: true, firstName: true, lastName: true, leadScore: true, companyId: true },
     take: 10,
   });
 
@@ -313,6 +374,7 @@ export async function generateDailyInsights(): Promise<number> {
         probability: 10,
         stageEnteredAt: new Date(),
         contactId: lead.id,
+        companyId: lead.companyId || undefined,
       },
     });
 
