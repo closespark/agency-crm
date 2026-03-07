@@ -14,8 +14,12 @@ interface GeneratedStep {
   stepNumber: number;
   channel: "email" | "linkedin" | "call";
   delayDays: number;
+  angle?: string;
+  goal?: string;
+  objectionToAddress?: string;
+  tone?: string;
   subject?: string;
-  body: string;
+  body?: string;
   notes?: string;
 }
 

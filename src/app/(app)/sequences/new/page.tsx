@@ -16,7 +16,7 @@ import { parseJSON } from "@/lib/utils";
 interface GeneratedSequence {
   name: string;
   description: string;
-  steps: SequenceStep[];
+  steps: Partial<SequenceStep> & { stepNumber: number; channel: "email" | "linkedin" | "call"; delayDays: number }[];
   estimatedDuration: string;
   strategy: string;
 }

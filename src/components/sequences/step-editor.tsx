@@ -11,8 +11,13 @@ export interface SequenceStep {
   stepNumber: number;
   channel: "email" | "linkedin" | "call";
   delayDays: number;
+  angle: string;
+  goal: string;
+  objectionToAddress?: string;
+  tone?: string;
+  // Legacy fields for backward compat
   subject?: string;
-  body: string;
+  body?: string;
   notes?: string;
 }
 
@@ -47,6 +52,16 @@ function StepCard({
 }) {
   const [expanded, setExpanded] = useState(true);
 
+  const stepLabel = step.angle
+    ? step.angle.length > 50
+      ? step.angle.slice(0, 50) + "..."
+      : step.angle
+    : step.channel === "email"
+      ? step.subject || "Email Step"
+      : step.channel === "linkedin"
+        ? "LinkedIn Message"
+        : "Phone Call";
+
   return (
     <div className="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
       <div
@@ -58,11 +73,7 @@ function StepCard({
             {index + 1}
           </span>
           <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            {step.channel === "email"
-              ? step.subject || "Email Step"
-              : step.channel === "linkedin"
-                ? "LinkedIn Message"
-                : "Phone Call"}
+            {stepLabel}
           </span>
           <span className="text-xs text-zinc-500">
             {step.channel} | {step.delayDays}d delay
@@ -175,40 +186,40 @@ function StepCard({
             />
           </div>
 
-          {step.channel === "email" && (
-            <Input
-              label="Subject"
-              placeholder="Email subject line..."
-              value={step.subject || ""}
-              onChange={(e) =>
-                onUpdate({ ...step, subject: e.target.value })
-              }
-            />
-          )}
-
           <Textarea
-            label={
-              step.channel === "call" ? "Call Script / Talking Points" : "Message Body"
-            }
-            placeholder={
-              step.channel === "email"
-                ? "Write your email body... Use {{firstName}}, {{companyName}}, {{jobTitle}} as placeholders."
-                : step.channel === "linkedin"
-                  ? "Write your LinkedIn message..."
-                  : "Outline your call talking points..."
-            }
-            rows={5}
-            value={step.body}
-            onChange={(e) => onUpdate({ ...step, body: e.target.value })}
+            label="Angle / Approach"
+            placeholder="What insight or value should this step lead with? e.g., 'Reference their HubSpot migration pain from the discovery call and position our workflow automation as the fix'"
+            rows={3}
+            value={step.angle || ""}
+            onChange={(e) => onUpdate({ ...step, angle: e.target.value })}
           />
 
-          <Textarea
-            label="Internal Notes (optional)"
-            placeholder="Strategy notes for this step..."
-            rows={2}
-            value={step.notes || ""}
-            onChange={(e) => onUpdate({ ...step, notes: e.target.value })}
+          <Input
+            label="Goal"
+            placeholder="What outcome do you want? e.g., 'Book a follow-up demo' or 'Get confirmation they'll review the proposal'"
+            value={step.goal || ""}
+            onChange={(e) => onUpdate({ ...step, goal: e.target.value })}
           />
+
+          <Input
+            label="Objection to Address (optional)"
+            placeholder="e.g., 'competing priorities' or 'budget concerns'"
+            value={step.objectionToAddress || ""}
+            onChange={(e) =>
+              onUpdate({ ...step, objectionToAddress: e.target.value })
+            }
+          />
+
+          <Input
+            label="Tone (optional)"
+            placeholder="e.g., 'direct and specific' or 'empathetic, peer-to-peer'"
+            value={step.tone || ""}
+            onChange={(e) => onUpdate({ ...step, tone: e.target.value })}
+          />
+
+          <div className="rounded-md bg-emerald-50 p-3 text-xs text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
+            The actual email copy will be generated per-contact at enrollment time using their discovery call transcript, BANT data, engagement history, company intel, and fit score.
+          </div>
         </div>
       )}
     </div>
@@ -221,9 +232,8 @@ export function StepEditor({ steps, onChange, className }: StepEditorProps) {
       stepNumber: steps.length + 1,
       channel: "email",
       delayDays: steps.length === 0 ? 0 : 2,
-      subject: "",
-      body: "",
-      notes: "",
+      angle: "",
+      goal: "",
     };
     onChange([...steps, newStep]);
   }
@@ -236,7 +246,6 @@ export function StepEditor({ steps, onChange, className }: StepEditorProps) {
 
   function removeStep(index: number) {
     const newSteps = steps.filter((_, i) => i !== index);
-    // Renumber
     onChange(newSteps.map((s, i) => ({ ...s, stepNumber: i + 1 })));
   }
 
@@ -245,7 +254,6 @@ export function StepEditor({ steps, onChange, className }: StepEditorProps) {
     const newSteps = [...steps];
     const [moved] = newSteps.splice(from, 1);
     newSteps.splice(to, 0, moved);
-    // Renumber
     onChange(newSteps.map((s, i) => ({ ...s, stepNumber: i + 1 })));
   }
 

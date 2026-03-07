@@ -7,8 +7,14 @@ interface SequenceStep {
   stepNumber: number;
   channel: "email" | "linkedin" | "call";
   delayDays: number;
+  // New-style strategy fields (copy generated at enrollment time)
+  angle?: string;
+  goal?: string;
+  objectionToAddress?: string;
+  tone?: string;
+  // Legacy fields (pre-written copy)
   subject?: string;
-  body: string;
+  body?: string;
   notes?: string;
 }
 
@@ -128,20 +134,48 @@ export function SequenceTimeline({
                 {isCompleted && <Badge variant="success">Done</Badge>}
               </div>
 
-              {step.subject && (
-                <p className="mt-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  {step.subject}
-                </p>
-              )}
-
-              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                {truncateBody(step.body)}
-              </p>
-
-              {step.notes && (
-                <p className="mt-2 text-xs italic text-zinc-400 dark:text-zinc-500">
-                  Note: {step.notes}
-                </p>
+              {/* New-style strategy steps */}
+              {step.angle ? (
+                <>
+                  <p className="mt-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                    {step.angle}
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    Goal: {step.goal}
+                  </p>
+                  {step.objectionToAddress && (
+                    <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                      Objection: {step.objectionToAddress}
+                    </p>
+                  )}
+                  {step.tone && (
+                    <p className="mt-1 text-xs italic text-zinc-400 dark:text-zinc-500">
+                      Tone: {step.tone}
+                    </p>
+                  )}
+                  <p className="mt-2 text-xs text-emerald-600 dark:text-emerald-400">
+                    Copy generated per-contact at enrollment time using full intelligence
+                  </p>
+                </>
+              ) : (
+                <>
+                  {/* Legacy pre-written steps */}
+                  {step.subject && (
+                    <p className="mt-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                      {step.subject}
+                    </p>
+                  )}
+                  {step.body && (
+                    <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                      {truncateBody(step.body)}
+                    </p>
+                  )}
+                  {step.notes && (
+                    <p className="mt-2 text-xs italic text-zinc-400 dark:text-zinc-500">
+                      Note: {step.notes}
+                    </p>
+                  )}
+                </>
               )}
             </div>
           </div>

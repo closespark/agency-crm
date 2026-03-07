@@ -56,8 +56,12 @@ export async function processSequenceQueue(): Promise<number> {
         stepNumber: number;
         channel: string;
         delayDays: number;
+        angle?: string;
+        goal?: string;
+        objectionToAddress?: string;
+        tone?: string;
         subject?: string;
-        body: string;
+        body?: string;
       }>;
 
       const currentStep = steps[enrollment.currentStep];
@@ -69,28 +73,49 @@ export async function processSequenceQueue(): Promise<number> {
         continue;
       }
 
-      // Personalize the message using AI
-      const personalizedResult = await runAIJob(
-        "email_composer",
-        "personalize_step",
-        {
-          template: currentStep,
-          contact: {
-            firstName: enrollment.contact.firstName,
-            lastName: enrollment.contact.lastName,
-            email: enrollment.contact.email,
-            jobTitle: enrollment.contact.jobTitle,
-            companyName: enrollment.contact.company?.name,
-            industry: enrollment.contact.company?.industry,
-          },
-        },
-        { contactId: enrollment.contactId }
-      );
+      // Gather full contact intelligence for AI copy generation
+      const { gatherContactIntelligence, generateStepCopy } = await import("./sequence-generator");
+      const intel = await gatherContactIntelligence(enrollment.contactId, enrollment.sequenceId);
 
-      const personalized = personalizedResult.output as {
-        subject?: string;
-        body: string;
-      };
+      let personalized: { subject?: string; body: string };
+
+      // New-style steps have angle/goal — generate copy from scratch using full intelligence
+      // Old-style steps have pre-written body — fall back to basic personalization
+      if (currentStep.angle) {
+        const copy = await generateStepCopy({
+          step: currentStep as import("./sequence-generator").SequenceStep,
+          intel,
+          sequenceName: enrollment.sequence.name,
+          sequenceStrategy: enrollment.sequence.description || "",
+        });
+        personalized = copy;
+      } else {
+        // Legacy fallback for old sequences with pre-written body text
+        const personalizedResult = await runAIJob(
+          "email_composer",
+          "personalize_step",
+          {
+            template: currentStep,
+            contact: {
+              firstName: enrollment.contact.firstName,
+              lastName: enrollment.contact.lastName,
+              email: enrollment.contact.email,
+              jobTitle: enrollment.contact.jobTitle,
+              companyName: enrollment.contact.company?.name,
+              industry: enrollment.contact.company?.industry,
+            },
+            // Even for legacy sequences, feed in available intelligence
+            discoveryNotes: intel.conversations
+              .filter((c) => c.direction === "inbound")
+              .map((c) => c.summary || c.content)
+              .join("\n"),
+            bantData: intel.bant,
+            engagementData: intel.engagement,
+          },
+          { contactId: enrollment.contactId }
+        );
+        personalized = personalizedResult.output as { subject?: string; body: string };
+      }
 
       // Determine sending route based on contact's domain tier
       const enrolledContact = await prisma.contact.findUnique({
