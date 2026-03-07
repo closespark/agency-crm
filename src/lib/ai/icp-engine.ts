@@ -17,7 +17,7 @@ export interface ICPConfig {
   version: number;
 
   // Primary filters — non-negotiable gates (Apollo query params)
-  requiredTechnology: string;
+  requiredTechnology: string; // Tech stack filter — must have this installed (e.g., "HubSpot")
   geography: string;
   employeeRange: { min: number; max: number };
   decisionMakerTitles: string[];
@@ -50,16 +50,24 @@ export const SEED_ICP: ICPConfig = {
   // Primary filters (gates, not scores)
   requiredTechnology: "HubSpot",
   geography: "United States",
-  employeeRange: { min: 10, max: 200 },
+  employeeRange: { min: 10, max: 500 },
   decisionMakerTitles: [
     "Founder",
     "CEO",
     "Co-Founder",
+    "CRO",
     "VP Marketing",
     "CMO",
     "Head of Revenue",
     "Director of Marketing",
     "VP Sales",
+    "RevOps",
+    "Revenue Operations",
+    "Marketing Operations",
+    "Sales Operations",
+    "Director of RevOps",
+    "Head of RevOps",
+    "VP Revenue Operations",
   ],
 
   // Secondary scoring signals
@@ -86,17 +94,23 @@ export const SEED_ICP: ICPConfig = {
   ],
 
   // Scoring weights (seed — will drift)
+  // From search results alone: max = 15+15+10+15 = 55
+  // With enrichment signals: max = 55+25+10 = 90
+  // Job posting is the strongest buying intent signal — they have pain and budget NOW
+  // Multiple DMs at 15 because multi-threaded deals close at 2-3x rate
+  // Title at 15 (not higher) because ops people champion the purchase, not C-suite
   weights: {
-    decisionMakerTitle: 20,
-    industryMatch: 15,
+    decisionMakerTitle: 15,
+    industryMatch: 0, // Not used — HubSpot gate is the only vertical filter
     employeeRangeMatch: 10,
-    revenueRangeMatch: 10,
+    revenueRangeMatch: 15,
     activeJobPosting: 25,
-    headcountGrowth: 15,
-    multipleDecisionMakers: 5,
+    headcountGrowth: 10,
+    multipleDecisionMakers: 15,
   },
 
-  minimumScore: 60,
+  // Threshold 45 = forces at least one intent signal beyond basic firmographics
+  minimumScore: 45,
 };
 
 // ============================================
@@ -134,13 +148,28 @@ export function invalidateICPCache() {
 // BUILD APOLLO SEARCH PARAMS FROM ICP
 // ============================================
 
+// Apollo technology UIDs for tech stack filtering
+// These are stable IDs from Apollo's technology database
+const TECHNOLOGY_UIDS: Record<string, string> = {
+  HubSpot: "5c1052d7f3e7bb3d4e30b356",
+  Salesforce: "5c1052d7f3e7bb3d4e30b35a",
+  Marketo: "5c1052d7f3e7bb3d4e30b35c",
+  Pardot: "5c1052d7f3e7bb3d4e30b35d",
+};
+
 export function buildApolloParams(icp: ICPConfig) {
+  // Resolve technology name to Apollo UID for proper tech stack filtering
+  const techUid = TECHNOLOGY_UIDS[icp.requiredTechnology];
+
   return {
     person_titles: icp.decisionMakerTitles,
     person_locations: [icp.geography],
     organization_num_employees_ranges: [`${icp.employeeRange.min},${icp.employeeRange.max}`],
-    q_organization_keyword_tags: [icp.requiredTechnology],
-    per_page: 25,
+    // Filter by companies that actually have this technology installed
+    ...(techUid
+      ? { currently_using_any_of_technology_uids: [techUid] }
+      : { q_keywords: icp.requiredTechnology }),
+    per_page: 100,
   };
 }
 
@@ -196,14 +225,16 @@ export function scoreProspect(
     reasons.push(`Title match: "${person.title}"`);
   }
 
-  // Industry match
-  const industry = (person.organization?.industry || "").toLowerCase();
-  const industryMatch = icp.targetIndustries.some((i) =>
-    industry.includes(i.toLowerCase())
-  );
-  if (industryMatch) {
-    breakdown.industryMatch = icp.weights.industryMatch;
-    reasons.push(`Industry match: "${person.organization?.industry}"`);
+  // Industry match — skipped when weight is 0 (HubSpot gate is the only vertical filter)
+  if (icp.weights.industryMatch > 0) {
+    const industry = (person.organization?.industry || "").toLowerCase();
+    const industryMatch = icp.targetIndustries.some((i) =>
+      industry.includes(i.toLowerCase())
+    );
+    if (industryMatch) {
+      breakdown.industryMatch = icp.weights.industryMatch;
+      reasons.push(`Industry match: "${person.organization?.industry}"`);
+    }
   }
 
   // Employee range match
@@ -659,7 +690,25 @@ export async function optimizeICP(): Promise<{ optimized: boolean; reason: strin
 // ============================================
 
 export async function seedICPIfEmpty(): Promise<void> {
-  const existing = await prisma.iCPProfile.findFirst();
+  const existing = await prisma.iCPProfile.findFirst({
+    where: { isActive: true },
+    orderBy: { version: "desc" },
+  });
+
+  // Update existing v1 seed config if weights/threshold are stale
+  if (existing && existing.version === 1) {
+    const currentConfig = safeParseJSON(existing.apolloSearchParams, null) as ICPConfig | null;
+    if (currentConfig && currentConfig.minimumScore !== SEED_ICP.minimumScore) {
+      await prisma.iCPProfile.update({
+        where: { id: existing.id },
+        data: { apolloSearchParams: JSON.stringify(SEED_ICP) },
+      });
+      invalidateICPCache();
+      console.log("[icp-engine] Updated stale ICP v1 config with new weights/threshold");
+    }
+    return;
+  }
+
   if (existing) return;
 
   await prisma.iCPProfile.create({
@@ -672,7 +721,7 @@ export async function seedICPIfEmpty(): Promise<void> {
       jobTitles: JSON.stringify(
         SEED_ICP.decisionMakerTitles.map((t) => ({ title: t, priority: 1 }))
       ),
-      companySizes: JSON.stringify({ range: "10-200" }),
+      companySizes: JSON.stringify({ range: "10-500" }),
       revenueRanges: JSON.stringify({ min: 1_000_000, max: 50_000_000 }),
       techStack: JSON.stringify(["HubSpot"]),
       geographies: JSON.stringify(["United States"]),

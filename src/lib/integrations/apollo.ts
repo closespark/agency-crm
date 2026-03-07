@@ -145,6 +145,7 @@ export interface ApolloSearchParams {
   organization_industry_tag_ids?: string[];
   organization_num_employees_ranges?: string[];
   organization_locations?: string[];
+  currently_using_any_of_technology_uids?: string[];
   q_keywords?: string;
   page?: number;
   per_page?: number;
