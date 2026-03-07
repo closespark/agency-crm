@@ -250,6 +250,117 @@ export async function createCalendarEvent(params: {
 }
 
 // ============================================
+// SYNC CALENDAR EVENTS → Meeting table
+// ============================================
+
+export async function syncCalendarEvents(): Promise<number> {
+  const config = await getConfig();
+  const token = await getAccessToken();
+  if (!token || !config) return 0;
+
+  const calendarId = config.calendar_id || "primary";
+
+  const now = new Date();
+  const sevenDaysOut = new Date(now);
+  sevenDaysOut.setUTCDate(sevenDaysOut.getUTCDate() + 7);
+
+  const res = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?` +
+      new URLSearchParams({
+        timeMin: now.toISOString(),
+        timeMax: sevenDaysOut.toISOString(),
+        singleEvents: "true",
+        orderBy: "startTime",
+        maxResults: "100",
+      }),
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+
+  if (!res.ok) {
+    console.error("[gcal] List events failed:", await res.text());
+    return 0;
+  }
+
+  const data = await res.json();
+  const events: Array<{
+    id: string;
+    summary?: string;
+    description?: string;
+    start?: { dateTime?: string; date?: string };
+    end?: { dateTime?: string; date?: string };
+    attendees?: Array<{ email: string }>;
+    hangoutLink?: string;
+    location?: string;
+    status?: string;
+  }> = data.items || [];
+
+  let synced = 0;
+
+  for (const event of events) {
+    // Skip cancelled events
+    if (event.status === "cancelled") continue;
+
+    const startTime = event.start?.dateTime || event.start?.date;
+    const endTime = event.end?.dateTime || event.end?.date;
+    if (!startTime || !endTime) continue;
+
+    const eventStart = new Date(startTime);
+    const eventEnd = new Date(endTime);
+    const title = event.summary || "Untitled Event";
+    const meetingLocation = event.hangoutLink || event.location || null;
+
+    // Deduplicate: match by Google Calendar event ID stored in location/description,
+    // or by exact title + startTime
+    const existing = await prisma.meeting.findFirst({
+      where: {
+        OR: [
+          // Match by gcal event ID in description metadata
+          { description: { contains: `gcal:${event.id}` } },
+          // Match by exact title + start time (covers manually-created duplicates)
+          { title, startTime: eventStart },
+        ],
+      },
+    });
+
+    if (existing) continue;
+
+    // Try to match an attendee to a CRM contact
+    let contactId: string | null = null;
+    if (event.attendees?.length) {
+      for (const attendee of event.attendees) {
+        const contact = await prisma.contact.findFirst({
+          where: { email: attendee.email },
+          select: { id: true },
+        });
+        if (contact) {
+          contactId = contact.id;
+          break;
+        }
+      }
+    }
+
+    await prisma.meeting.create({
+      data: {
+        title,
+        description: `${event.description || ""}\n\ngcal:${event.id}`.trim(),
+        startTime: eventStart,
+        endTime: eventEnd,
+        location: meetingLocation,
+        type: "one_on_one",
+        contactId,
+        status: "scheduled",
+      },
+    });
+
+    synced++;
+  }
+
+  return synced;
+}
+
+// ============================================
 // CHECK IF INTEGRATION IS CONFIGURED
 // ============================================
 

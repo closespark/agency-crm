@@ -112,7 +112,7 @@ export default function AIInsightsPage() {
         <EmptyState
           icon={<Lightbulb size={48} />}
           title="No insights found"
-          description="Run the AI engine to generate insights from your CRM data."
+          description="Insights are generated automatically by the daily autopilot."
         />
       ) : (
         <div className="space-y-3">

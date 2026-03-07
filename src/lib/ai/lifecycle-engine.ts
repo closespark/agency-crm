@@ -800,6 +800,43 @@ export async function processAutoAdvanceRules(): Promise<number> {
     }
   }
 
+  // 8. Deal auto-advance: advance deals when all required fields for the next stage are populated
+  const dealStageOrder = Object.keys(DEAL_STAGES);
+  const openDeals = await prisma.deal.findMany({
+    where: {
+      stage: { notIn: ["closed_won", "closed_lost"] },
+    },
+  });
+  for (const deal of openDeals) {
+    const currentIdx = dealStageOrder.indexOf(deal.stage);
+    if (currentIdx === -1 || currentIdx >= dealStageOrder.length - 1) continue;
+
+    const nextStage = dealStageOrder[currentIdx + 1];
+    if (nextStage === "closed_lost") continue; // never auto-advance to closed_lost
+
+    const nextConfig = DEAL_STAGES[nextStage];
+    if (!nextConfig) continue;
+
+    // Check if all required fields for the next stage are populated
+    const missing = nextConfig.requiredFields.filter((field) => {
+      const value = (deal as Record<string, unknown>)[field];
+      return value === null || value === undefined || value === "";
+    });
+
+    if (missing.length === 0) {
+      const result = await advanceDealStage(
+        deal.id,
+        nextStage,
+        "ai_auto",
+        `Auto-advanced: all required fields for ${nextStage} are present`
+      );
+      if (result.success) {
+        console.log(`[lifecycle] Deal "${deal.name}" auto-advanced from ${deal.stage} to ${nextStage}`);
+        advanced++;
+      }
+    }
+  }
+
   return advanced;
 }
 
@@ -818,10 +855,10 @@ export async function seedStageGates(): Promise<void> {
     { objectType: "contact", fromStage: "customer", toStage: "evangelist", requiredFields: ["email"], autoAdvance: true, confidenceThreshold: 0.9 },
 
     // Deal stage gates
-    { objectType: "deal", fromStage: "discovery", toStage: "proposal_sent", requiredFields: ["scopeOfWork", "proposalDoc", "pricingBreakdown"], autoAdvance: false },
-    { objectType: "deal", fromStage: "proposal_sent", toStage: "negotiation", requiredFields: ["negotiationNotes"], autoAdvance: false },
-    { objectType: "deal", fromStage: "negotiation", toStage: "contract_sent", requiredFields: ["contractSentAt", "contractVersion"], autoAdvance: false },
-    { objectType: "deal", fromStage: "contract_sent", toStage: "closed_won", requiredFields: ["actualAmount", "paymentTerms", "startDate"], autoAdvance: false },
+    { objectType: "deal", fromStage: "discovery", toStage: "proposal_sent", requiredFields: ["scopeOfWork", "proposalDoc", "pricingBreakdown"], autoAdvance: true },
+    { objectType: "deal", fromStage: "proposal_sent", toStage: "negotiation", requiredFields: ["negotiationNotes"], autoAdvance: true },
+    { objectType: "deal", fromStage: "negotiation", toStage: "contract_sent", requiredFields: ["contractSentAt", "contractVersion"], autoAdvance: true },
+    { objectType: "deal", fromStage: "contract_sent", toStage: "closed_won", requiredFields: ["actualAmount", "paymentTerms", "startDate"], autoAdvance: true },
   ];
 
   for (const gate of gates) {

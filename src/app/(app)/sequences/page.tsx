@@ -211,7 +211,7 @@ export default function SequencesPage() {
         totalPages={totalPages}
         onPageChange={setPage}
         onRowClick={(item) => router.push(`/sequences/${item.id}`)}
-        emptyMessage="No sequences yet. Create your first one!"
+        emptyMessage="Sequences are auto-generated on first boot. If empty, check the worker logs."
       />
     </div>
   );

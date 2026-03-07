@@ -172,7 +172,7 @@ export default function ProspectingPage() {
         {searches.length === 0 ? (
           <EmptyState
             title="No searches yet"
-            description="Create your first ICP search to start discovering prospects."
+            description="Prospecting runs automatically. Searches will appear after the next autopilot cycle."
             action={
               <Link href="/prospecting/search/new">
                 <Button>Create Search</Button>

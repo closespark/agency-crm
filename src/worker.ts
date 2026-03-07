@@ -12,8 +12,10 @@ import { getKey } from "./lib/integration-keys";
 
 const TICK_INTERVAL_MS = 30_000; // Check for work every 30 seconds
 const DAILY_AUTOPILOT_HOUR = 6; // Run daily autopilot at 6 AM UTC
+const GMAIL_WATCH_INTERVAL_MS = 6 * 24 * 60 * 60 * 1000; // Re-register every 6 days (watches expire after 7)
 
 let lastAutopilotDate = "";
+let lastGmailWatchAt = 0;
 let isShuttingDown = false;
 
 // ============================================
@@ -36,7 +38,10 @@ async function tick() {
     // 4. Publish due content (newsletters, blog posts)
     await publishDueContent();
 
-    // 5. Run daily autopilot (once per day)
+    // 5. Re-register Gmail push notifications (watches expire after 7 days)
+    await maybeRenewGmailWatch();
+
+    // 6. Run daily autopilot (once per day)
     await maybeDailyAutopilot();
   } catch (err) {
     console.error("[worker] tick error:", err);
@@ -139,6 +144,40 @@ async function processSequences() {
   } catch (err) {
     console.error("[worker] sequence processing error:", err);
   }
+
+  // Auto-push active sequences with cold-domain contacts to Instantly
+  try {
+    if (!process.env.INSTANTLY_API_KEY) return;
+
+    // Find active sequences that have cold-domain enrollments not yet pushed
+    const candidates = await prisma.sequence.findMany({
+      where: {
+        isActive: true,
+        enrollments: {
+          some: {
+            status: "active",
+            contact: { domainTier: "cold" },
+            metadata: { not: { contains: "instantlyCampaignId" } },
+          },
+        },
+      },
+      select: { id: true, name: true },
+    });
+
+    if (candidates.length > 0) {
+      const { pushSequenceToInstantly } = await import("./lib/integrations/sync");
+      for (const seq of candidates) {
+        try {
+          const result = await pushSequenceToInstantly(seq.id);
+          console.log(`[worker] auto-pushed sequence "${seq.name}" to Instantly: ${result.leadsAdded} leads, campaign ${result.instantlyId}`);
+        } catch (err) {
+          console.error(`[worker] auto-push to Instantly failed for sequence ${seq.id}:`, err);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[worker] Instantly auto-push error:", err);
+  }
 }
 
 // ============================================
@@ -176,6 +215,23 @@ async function processMeetingLifecycle() {
     }
   } catch (err) {
     console.error("[worker] meeting lifecycle error:", err);
+  }
+}
+
+// ============================================
+// GMAIL WATCH (push notification registration)
+// ============================================
+
+async function maybeRenewGmailWatch() {
+  if (Date.now() - lastGmailWatchAt < GMAIL_WATCH_INTERVAL_MS) return;
+
+  try {
+    const { setupGmailWatch } = await import("./lib/integrations/gmail");
+    const result = await setupGmailWatch();
+    lastGmailWatchAt = Date.now();
+    console.log(`[worker] Gmail watch registered (expires: ${result.expiration})`);
+  } catch (err) {
+    console.error("[worker] Gmail watch registration failed:", err);
   }
 }
 
@@ -233,16 +289,83 @@ async function maybeDailyAutopilot() {
       const prospecting = await runProspectingCycle();
       console.log(`[worker] prospecting: ${prospecting.accepted} accepted, ${prospecting.rejected} rejected`);
 
-      // Auto-convert new prospects to contacts (full autonomous pipeline)
+      // Auto-enrich un-enriched prospects before conversion
       if (prospecting.accepted > 0) {
+        const unenriched = await prisma.prospect.findMany({
+          where: { status: "new", enrichedData: null },
+          orderBy: { fitScore: "desc" },
+        });
+
+        if (unenriched.length > 0) {
+          const { apollo } = await import("./lib/integrations/apollo");
+          let enriched = 0;
+          for (const prospect of unenriched) {
+            try {
+              let enrichedPerson = null;
+              if (prospect.email) {
+                const personResult = await apollo.enrichPerson(prospect.email);
+                enrichedPerson = personResult.person;
+              }
+
+              let enrichedCompany = null;
+              if (prospect.companyDomain) {
+                const companyResult = await apollo.enrichCompany(prospect.companyDomain);
+                enrichedCompany = companyResult.organization;
+              }
+
+              const enrichedData = {
+                person: enrichedPerson,
+                company: enrichedCompany,
+                enrichedAt: new Date().toISOString(),
+              };
+
+              const updateData: Record<string, unknown> = {
+                enrichedData: JSON.stringify(enrichedData),
+                status: "verified",
+              };
+
+              if (enrichedPerson) {
+                if (!prospect.email && enrichedPerson.email) updateData.email = enrichedPerson.email;
+                if (!prospect.linkedinUrl && enrichedPerson.linkedin_url) updateData.linkedinUrl = enrichedPerson.linkedin_url;
+                if (!prospect.jobTitle && enrichedPerson.title) updateData.jobTitle = enrichedPerson.title;
+              }
+
+              if (enrichedCompany) {
+                if (!prospect.companySize && enrichedCompany.estimated_num_employees) {
+                  const emp = enrichedCompany.estimated_num_employees;
+                  if (emp <= 10) updateData.companySize = "1-10";
+                  else if (emp <= 50) updateData.companySize = "11-50";
+                  else if (emp <= 200) updateData.companySize = "51-200";
+                  else if (emp <= 500) updateData.companySize = "201-500";
+                  else if (emp <= 1000) updateData.companySize = "501-1000";
+                  else updateData.companySize = "1001+";
+                }
+                if (!prospect.industry && enrichedCompany.industry) updateData.industry = enrichedCompany.industry;
+              }
+
+              await prisma.prospect.update({
+                where: { id: prospect.id },
+                data: updateData,
+              });
+              enriched++;
+            } catch (err) {
+              console.error(`[worker] auto-enrich prospect ${prospect.id} failed:`, err);
+            }
+          }
+          if (enriched > 0) {
+            console.log(`[worker] auto-enriched ${enriched} prospects`);
+          }
+        }
+
+        // Auto-convert enriched prospects to contacts (full autonomous pipeline)
         const { convertProspectToContact } = await import("./lib/ai/prospector");
-        const newProspects = await prisma.prospect.findMany({
-          where: { status: "new" },
+        const readyProspects = await prisma.prospect.findMany({
+          where: { status: { in: ["new", "verified"] } },
           orderBy: { fitScore: "desc" },
         });
 
         let converted = 0;
-        for (const prospect of newProspects) {
+        for (const prospect of readyProspects) {
           try {
             await convertProspectToContact(prospect.id);
             converted++;
@@ -325,6 +448,16 @@ async function start() {
     console.log("[worker] integration keys loaded from DB");
   } catch (err) {
     console.warn("[worker] failed to load integration keys from DB:", err);
+  }
+
+  // Initialize Gmail push notifications (watch expires after 7 days, re-registered in tick loop)
+  try {
+    const { setupGmailWatch } = await import("./lib/integrations/gmail");
+    const result = await setupGmailWatch();
+    lastGmailWatchAt = Date.now();
+    console.log(`[worker] Gmail watch initialized (expires: ${result.expiration})`);
+  } catch (err) {
+    console.warn("[worker] Gmail watch setup failed (will retry in tick loop):", err);
   }
 
   // Check last autopilot run to avoid re-running on restart

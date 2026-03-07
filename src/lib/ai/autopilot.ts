@@ -260,6 +260,25 @@ export async function generateDailyInsights(): Promise<number> {
     console.error("Gmail inbox sync failed:", err);
   }
 
+  // 0b. Sync Google Calendar events into Meeting table (externally-booked meetings)
+  try {
+    const { syncCalendarEvents } = await import("@/lib/integrations/google-calendar");
+    const calSynced = await syncCalendarEvents();
+    if (calSynced > 0) {
+      console.log(`[autopilot] synced ${calSynced} calendar events into Meeting table`);
+    }
+  } catch (err) {
+    console.error("Google Calendar sync failed:", err);
+  }
+
+  // 0c. Sync Instantly campaign metrics (keeps campaign data fresh)
+  try {
+    const { syncInstantlyCampaigns } = await import("@/lib/integrations/sync");
+    await syncInstantlyCampaigns();
+  } catch (err) {
+    console.error("Instantly campaign sync failed:", err);
+  }
+
   // === SCORING & QUALIFICATION ===
 
   // 1. Apply score decay (25%/month behavioral, full reset at 90 days)

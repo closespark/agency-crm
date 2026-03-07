@@ -63,7 +63,7 @@ export default function TemplatesPage() {
       ) : templates.length === 0 ? (
         <EmptyState
           title="No templates found"
-          description="Create your first email template"
+          description="Templates are auto-generated on first boot."
           action={
             <Link href="/marketing/templates/new">
               <Button>New Template</Button>
