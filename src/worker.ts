@@ -22,10 +22,28 @@ let isShuttingDown = false;
 // MAIN LOOP
 // ============================================
 
+async function isAutopilotPaused(): Promise<boolean> {
+  try {
+    const record = await prisma.systemChangelog.findFirst({
+      where: { category: "autopilot", changeType: "status" },
+      orderBy: { createdAt: "desc" },
+    });
+    return record?.description === "paused";
+  } catch {
+    return false; // Default to active if DB check fails
+  }
+}
+
 async function tick() {
   if (isShuttingDown) return;
 
   try {
+    // Check if autopilot has been paused via the UI
+    const paused = await isAutopilotPaused();
+    if (paused) {
+      return; // Skip all processing when paused
+    }
+
     // 1. Process scheduled jobs from Redis
     await processScheduledJobs();
 

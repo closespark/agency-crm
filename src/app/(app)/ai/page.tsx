@@ -64,6 +64,7 @@ export default function AICommandCenterPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [autopilotActive, setAutopilotActive] = useState(true);
+  const [togglingAutopilot, setTogglingAutopilot] = useState(false);
   const [runningAction, setRunningAction] = useState<string | null>(null);
 
   // Insights tab state
@@ -79,6 +80,31 @@ export default function AICommandCenterPage() {
   const [convTotalPages, setConvTotalPages] = useState(1);
   const [convChannel, setConvChannel] = useState("");
   const [convSentiment, setConvSentiment] = useState("");
+
+  const fetchAutopilotStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/ai/autopilot");
+      const data = await res.json();
+      if (data.data) setAutopilotActive(data.data.isActive);
+    } catch {
+      // Default to active on error
+    }
+  }, []);
+
+  const toggleAutopilot = useCallback(async () => {
+    setTogglingAutopilot(true);
+    try {
+      const res = await fetch("/api/ai/autopilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: !autopilotActive }),
+      });
+      const data = await res.json();
+      if (data.data) setAutopilotActive(data.data.isActive);
+    } finally {
+      setTogglingAutopilot(false);
+    }
+  }, [autopilotActive]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -117,8 +143,9 @@ export default function AICommandCenterPage() {
   }, [convPage, convChannel, convSentiment]);
 
   useEffect(() => {
+    fetchAutopilotStatus();
     fetchStats();
-  }, [fetchStats]);
+  }, [fetchAutopilotStatus, fetchStats]);
 
   useEffect(() => {
     fetchInsights();
@@ -226,9 +253,16 @@ export default function AICommandCenterPage() {
             </div>
             <Button
               variant={autopilotActive ? "outline" : "default"}
-              onClick={() => setAutopilotActive(!autopilotActive)}
+              onClick={toggleAutopilot}
+              disabled={togglingAutopilot}
             >
-              {autopilotActive ? <Pause size={16} /> : <Play size={16} />}
+              {togglingAutopilot ? (
+                <Spinner size="sm" />
+              ) : autopilotActive ? (
+                <Pause size={16} />
+              ) : (
+                <Play size={16} />
+              )}
               {autopilotActive ? "Pause" : "Activate"}
             </Button>
           </div>
