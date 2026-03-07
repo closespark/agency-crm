@@ -360,39 +360,7 @@ export default function SequenceDetailPage({
             <Button variant="outline" size="sm" onClick={handleToggleActive}>
               {sequence.isActive ? "Pause" : "Resume"}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => router.push(`/sequences/new?edit=${id}`)}
-            >
-              Edit Steps
-            </Button>
-            <Button size="sm" onClick={() => setEnrollModalOpen(true)}>
-              Enroll Contacts
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handlePushInstantly}
-              disabled={pushingInstantly}
-            >
-              {pushingInstantly ? "Pushing..." : "Push to Instantly"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handlePushAlfred}
-              disabled={pushingAlfred}
-            >
-              {pushingAlfred ? "Pushing..." : "Push to Alfred"}
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setDeleteDialogOpen(true)}
-            >
-              Delete
-            </Button>
+            <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
           </div>
         }
       />

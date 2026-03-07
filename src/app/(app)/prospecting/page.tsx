@@ -5,7 +5,6 @@ import Link from "next/link";
 import { PageHeader } from "@/components/shared/page-header";
 import { SearchInput } from "@/components/shared/search-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Pagination } from "@/components/ui/pagination";
 import { PageLoader, EmptyState } from "@/components/ui/loading";
@@ -107,9 +106,7 @@ export default function ProspectingPage() {
         title="Prospecting"
         description="AI-powered prospect discovery and enrichment"
         actions={
-          <Link href="/prospecting/search/new">
-            <Button>New ICP Search</Button>
-          </Link>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 
@@ -141,20 +138,11 @@ export default function ProspectingPage() {
         </Card>
       </div>
 
-      {/* Quick Actions */}
+      {/* AI Status */}
       <div className="mb-6">
-        <h2 className="mb-3 text-lg font-semibold text-zinc-900 dark:text-zinc-100">Quick Actions</h2>
-        <div className="flex flex-wrap gap-3">
-          <Link href="/prospecting/search/new">
-            <Button variant="outline">New ICP Search</Button>
-          </Link>
-          <Link href="/prospecting/search/new?source=apollo">
-            <Button variant="outline">Search Apollo.io</Button>
-          </Link>
-          <Link href="/prospecting/search/new?source=import">
-            <Button variant="outline">Import Prospects</Button>
-          </Link>
-        </div>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          Prospecting runs autonomously via AI Autopilot. Searches and enrichment are handled automatically.
+        </p>
       </div>
 
       {/* Searches List */}
@@ -172,12 +160,7 @@ export default function ProspectingPage() {
         {searches.length === 0 ? (
           <EmptyState
             title="No searches yet"
-            description="Prospecting runs automatically. Searches will appear after the next autopilot cycle."
-            action={
-              <Link href="/prospecting/search/new">
-                <Button>Create Search</Button>
-              </Link>
-            }
+            description="Managed autonomously by AI. Searches will appear after the next autopilot cycle."
           />
         ) : (
           <>

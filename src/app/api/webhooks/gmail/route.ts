@@ -17,14 +17,14 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  // Verify this is from Google (check subscription matches our configured one)
+  // Verify this is from Google (subscription match + JWT signature verification)
   if (!body.message?.data || !body.subscription) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
 
   const { verifyGmailWebhook } = await import("@/lib/webhook-verify");
-  if (!(await verifyGmailWebhook(body.subscription))) {
-    return NextResponse.json({ error: "Invalid subscription" }, { status: 401 });
+  if (!(await verifyGmailWebhook(body.subscription, request))) {
+    return NextResponse.json({ error: "Invalid subscription or JWT" }, { status: 401 });
   }
 
   // Decode the notification

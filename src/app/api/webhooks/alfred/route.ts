@@ -150,14 +150,11 @@ export async function POST(request: NextRequest) {
 
         // Update contact lead status
         if (contact) {
+          const { incrementContactScore } = await import("@/lib/score-utils");
+          await incrementContactScore(contact.id, 5);
           await prisma.contact.update({
             where: { id: contact.id },
-            data: {
-              leadStatus: "contacted",
-              engagementScore: { increment: 5 },
-              leadScore: { increment: 5 },
-              scoreDirty: true,
-            },
+            data: { leadStatus: "contacted" },
           });
 
           // Log the connection acceptance as an activity

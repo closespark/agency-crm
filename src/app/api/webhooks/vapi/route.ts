@@ -78,15 +78,9 @@ export async function POST(request: NextRequest) {
             },
           });
 
-          // Bump engagement score for phone interaction (high-value)
-          await prisma.contact.update({
-            where: { id: contact.id },
-            data: {
-              engagementScore: { increment: 10 },
-              leadScore: { increment: 10 },
-              scoreDirty: true,
-            },
-          });
+          // Bump engagement score for phone interaction (high-value), capped at 100
+          const { incrementContactScore } = await import("@/lib/score-utils");
+          await incrementContactScore(contact.id, 10);
 
           // Create activity record
           const duration = event.call.startedAt && event.call.endedAt

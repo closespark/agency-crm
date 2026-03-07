@@ -146,6 +146,19 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
     return;
   }
 
+  // Cross-check: verify invoice state directly with Stripe API to prevent forged amounts
+  try {
+    const { syncInvoiceStatus } = await import("@/lib/integrations/stripe");
+    const verified = await syncInvoiceStatus(invoice.id);
+    if (verified.status !== "paid") {
+      console.error(`Stripe webhook: invoice ${invoice.id} claims paid but Stripe API says ${verified.status}`);
+      return;
+    }
+  } catch (err) {
+    console.error(`Stripe webhook: failed to verify invoice ${invoice.id} via API:`, err);
+    // Continue with webhook data if verification fails — better than blocking all payments
+  }
+
   const subscriptionId = resolveSubscriptionIdFromInvoice(invoice);
 
   // Update or create local invoice record

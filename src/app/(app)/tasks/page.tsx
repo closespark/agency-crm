@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, CheckCircle2, Circle, Clock } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { CheckCircle2, Circle, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/page-header";
@@ -232,12 +231,9 @@ export default function TasksPage() {
     <div>
       <PageHeader
         title="Tasks"
-        description="Manage your tasks and to-dos"
+        description="AI-managed tasks and to-dos"
         actions={
-          <Button onClick={() => router.push("/tasks/new")}>
-            <Plus className="h-4 w-4" />
-            Add Task
-          </Button>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 

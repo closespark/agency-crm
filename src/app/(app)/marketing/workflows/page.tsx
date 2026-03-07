@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { PageHeader } from "@/components/shared/page-header";
 import { SearchInput } from "@/components/shared/search-input";
 import { DataTable, type Column } from "@/components/shared/data-table";
@@ -131,11 +130,9 @@ export default function WorkflowsPage() {
     <div>
       <PageHeader
         title="Workflows"
-        description="Automate marketing and sales processes"
+        description="AI-managed marketing and sales automation"
         actions={
-          <Link href="/marketing/workflows/new">
-            <Button>New Workflow</Button>
-          </Link>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 

@@ -83,13 +83,8 @@ export async function POST(request: NextRequest) {
 
     // 3. If contact is identified AND high-intent page, bump engagementScore by 2
     if (contactId && HIGH_INTENT_PATHS.some((p) => body.path.startsWith(p))) {
-      await prisma.contact.update({
-        where: { id: contactId },
-        data: {
-          engagementScore: { increment: 2 },
-          scoreDirty: true,
-        },
-      });
+      const { incrementContactScore } = await import("@/lib/score-utils");
+      await incrementContactScore(contactId, 2, { engagementOnly: true });
     }
 
     // 4. If contact identified AND viewed pricing 3+ times in 7 days, create hot_lead insight

@@ -224,9 +224,7 @@ export default function ListDetailPage() {
 
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-semibold">Members</h2>
-        <Button size="sm" onClick={() => setShowAddModal(true)}>
-          Add Member
-        </Button>
+        <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
       </div>
 
       <DataTable

@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/page-header";
@@ -163,12 +161,9 @@ export default function ContactsPage() {
     <div>
       <PageHeader
         title="Contacts"
-        description="Manage your contacts and leads"
+        description="Auto-created from prospect conversion and integrations"
         actions={
-          <Button onClick={() => router.push("/contacts/new")}>
-            <Plus className="h-4 w-4" />
-            Add Contact
-          </Button>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 

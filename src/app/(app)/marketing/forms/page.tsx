@@ -2,11 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { PageHeader } from "@/components/shared/page-header";
 import { SearchInput } from "@/components/shared/search-input";
 import { DataTable, type Column } from "@/components/shared/data-table";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PageLoader } from "@/components/ui/loading";
 import { api, buildQueryString } from "@/lib/api";
@@ -91,11 +89,9 @@ export default function FormsPage() {
     <div>
       <PageHeader
         title="Forms"
-        description="Build forms to capture leads and submissions"
+        description="AI-managed lead capture forms"
         actions={
-          <Link href="/marketing/forms/new">
-            <Button>New Form</Button>
-          </Link>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 

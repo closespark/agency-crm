@@ -103,14 +103,7 @@ export default function WorkflowsPage() {
         title="Workflow Automation"
         description="Build trigger-action automations that run your CRM autonomously."
         actions={
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={handleAISuggest} disabled={suggesting}>
-              {suggesting ? "Analyzing..." : "AI Suggest Workflows"}
-            </Button>
-            <Link href="/workflows/new">
-              <Button>Create Workflow</Button>
-            </Link>
-          </div>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 
@@ -132,10 +125,7 @@ export default function WorkflowsPage() {
       ) : workflows.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center">
-            <p className="text-zinc-500">Workflows are auto-seeded on first boot. If empty, check the worker logs.</p>
-            <Link href="/workflows/new">
-              <Button className="mt-4">Create Workflow</Button>
-            </Link>
+            <p className="text-zinc-500">Managed autonomously by AI. Workflows will appear after the next autopilot cycle.</p>
           </CardContent>
         </Card>
       ) : (

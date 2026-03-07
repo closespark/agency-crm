@@ -220,7 +220,7 @@ export default function CmsHubPage() {
     <div>
       <PageHeader
         title="Content Management"
-        description="Manage pages, blog posts, and media assets"
+        description="AI-managed pages, blog posts, and media assets"
       />
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">

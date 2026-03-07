@@ -206,7 +206,7 @@ function SavedReportsTab() {
           No saved reports
         </h3>
         <p className="mt-1 text-sm text-zinc-500">
-          Saved reports will appear here once created.
+          Managed autonomously by AI. Reports will appear after the next autopilot cycle.
         </p>
       </div>
     );
@@ -258,7 +258,7 @@ export default function ReportsPage() {
     <div>
       <PageHeader
         title="Reports"
-        description="Analytics dashboards and saved reports"
+        description="Auto-generated analytics dashboards and reports"
       />
       <Tabs
         tabs={[

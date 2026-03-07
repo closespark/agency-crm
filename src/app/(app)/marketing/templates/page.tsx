@@ -1,10 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
 import { PageHeader } from "@/components/shared/page-header";
 import { SearchInput } from "@/components/shared/search-input";
-import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/ui/pagination";
 import { PageLoader, EmptyState } from "@/components/ui/loading";
 import { TemplatePreview } from "@/components/marketing/template-preview";
@@ -41,11 +39,9 @@ export default function TemplatesPage() {
     <div>
       <PageHeader
         title="Email Templates"
-        description="Design and manage reusable email templates"
+        description="AI-generated email templates"
         actions={
-          <Link href="/marketing/templates/new">
-            <Button>New Template</Button>
-          </Link>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 
@@ -63,12 +59,7 @@ export default function TemplatesPage() {
       ) : templates.length === 0 ? (
         <EmptyState
           title="No templates found"
-          description="Templates are auto-generated on first boot."
-          action={
-            <Link href="/marketing/templates/new">
-              <Button>New Template</Button>
-            </Link>
-          }
+          description="Managed autonomously by AI. Templates will appear after the next autopilot cycle."
         />
       ) : (
         <>

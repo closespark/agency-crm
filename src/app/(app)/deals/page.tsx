@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/page-header";
@@ -162,12 +160,9 @@ export default function DealsPage() {
     <div>
       <PageHeader
         title="Deals"
-        description="Track your sales pipeline"
+        description="Auto-created from pipeline activity"
         actions={
-          <Button onClick={() => router.push("/deals/new")}>
-            <Plus className="h-4 w-4" />
-            Add Deal
-          </Button>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 

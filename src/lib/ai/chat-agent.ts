@@ -170,12 +170,15 @@ ${contact.deals[0] ? `- Active Deal: ${contact.deals[0].name} (${contact.deals[0
           scoreDirty: true,
         },
         update: {
-          engagementScore: { increment: 10 },
           scoreDirty: true,
         },
       });
 
       contactId = contact.id;
+
+      // Capped score increment for chat interaction
+      const { incrementContactScore } = await import("@/lib/score-utils");
+      await incrementContactScore(contact.id, 10);
 
       // Link visitor identity
       await prisma.visitorIdentity.upsert({

@@ -87,11 +87,14 @@ export async function POST(request: NextRequest) {
           lastName: body.lastName || undefined,
           phone: body.phone || undefined,
           jobTitle: body.jobTitle || undefined,
-          engagementScore: { increment: 25 },
           scoreDirty: true,
         },
       });
       contactId = contact.id;
+
+      // Capped score increment for chat engagement
+      const { incrementContactScore } = await import("@/lib/score-utils");
+      await incrementContactScore(contact.id, 25);
 
       // If company provided, find or create Company and link
       if (body.company) {

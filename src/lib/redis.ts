@@ -62,6 +62,7 @@ export async function scheduleJob(
 /**
  * Pull all jobs that are due (runAt <= now).
  * Uses a distributed lock to prevent multiple workers from processing the same job.
+ * Jobs are moved to a processing set (not deleted) so they can be recovered on failure.
  */
 export async function pullDueJobs(): Promise<ScheduledJob[]> {
   const now = Date.now();
@@ -71,17 +72,62 @@ export async function pullDueJobs(): Promise<ScheduledJob[]> {
   for (const item of raw) {
     const job = JSON.parse(item) as ScheduledJob;
 
-    // Try to acquire a lock for this job (60s TTL)
+    // Try to acquire a lock for this job (120s TTL — enough for most jobs)
     const lockKey = `${JOB_LOCK_PREFIX}${job.id}`;
-    const acquired = await redis.set(lockKey, "1", "EX", 60, "NX");
+    const acquired = await redis.set(lockKey, "1", "EX", 120, "NX");
     if (!acquired) continue; // another worker grabbed it
 
-    // Remove from queue
+    // Move from queue to processing set (atomic: remove + add to processing)
     await redis.zrem(JOB_QUEUE_KEY, item);
+    await redis.set(`${JOB_PROCESSING_PREFIX}${job.id}`, item, "EX", 120);
     jobs.push(job);
   }
 
   return jobs;
+}
+
+const JOB_PROCESSING_PREFIX = "acrm:processing:";
+const JOB_RETRY_PREFIX = "acrm:retry:";
+const MAX_RETRIES = 3;
+
+/**
+ * Mark a job as successfully completed — removes from processing set.
+ */
+export async function completeJob(jobId: string): Promise<void> {
+  await redis.del(`${JOB_PROCESSING_PREFIX}${jobId}`);
+  await redis.del(`${JOB_LOCK_PREFIX}${jobId}`);
+  await redis.del(`${JOB_RETRY_PREFIX}${jobId}`);
+}
+
+/**
+ * Mark a job as failed — re-queues with exponential backoff if under retry limit.
+ * Returns true if re-queued, false if max retries exceeded (dead letter).
+ */
+export async function failJob(jobId: string): Promise<boolean> {
+  const raw = await redis.get(`${JOB_PROCESSING_PREFIX}${jobId}`);
+  if (!raw) return false;
+
+  // Track retry count
+  const retries = parseInt(await redis.get(`${JOB_RETRY_PREFIX}${jobId}`) || "0");
+  if (retries >= MAX_RETRIES) {
+    // Max retries exceeded — clean up, caller should log to dead letter
+    await redis.del(`${JOB_PROCESSING_PREFIX}${jobId}`);
+    await redis.del(`${JOB_LOCK_PREFIX}${jobId}`);
+    await redis.del(`${JOB_RETRY_PREFIX}${jobId}`);
+    return false;
+  }
+
+  // Re-queue with exponential backoff: 30s, 60s, 120s
+  const backoffMs = 30_000 * Math.pow(2, retries);
+  const retryAt = Date.now() + backoffMs;
+  await redis.zadd(JOB_QUEUE_KEY, retryAt, raw);
+  await redis.set(`${JOB_RETRY_PREFIX}${jobId}`, String(retries + 1), "EX", 3600);
+
+  // Clean up processing state
+  await redis.del(`${JOB_PROCESSING_PREFIX}${jobId}`);
+  await redis.del(`${JOB_LOCK_PREFIX}${jobId}`);
+
+  return true;
 }
 
 /**

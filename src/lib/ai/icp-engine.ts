@@ -6,7 +6,7 @@
 // the self-optimization engine drifts weights based on actual close data.
 
 import { prisma } from "@/lib/prisma";
-import type { ApolloPersonResult } from "@/lib/integrations/apollo";
+import type { ApolloPersonResult, ApolloSearchParams } from "@/lib/integrations/apollo";
 import { safeParseJSON } from "@/lib/safe-json";
 
 // ============================================
@@ -109,8 +109,11 @@ export const SEED_ICP: ICPConfig = {
     multipleDecisionMakers: 15,
   },
 
-  // Threshold 45 = forces at least one intent signal beyond basic firmographics
-  minimumScore: 45,
+  // Threshold 20 — Apollo query params already gate on tech stack + title + employee range.
+  // Scoring is for RANKING priority, not rejection. A single title match (15) or
+  // employee range match (10) + any partial signal gets you in.
+  // Enrichment signals (job posting, headcount growth, multi DMs) boost priority.
+  minimumScore: 20,
 };
 
 // ============================================
@@ -157,19 +160,34 @@ const TECHNOLOGY_UIDS: Record<string, string> = {
   Pardot: "5c1052d7f3e7bb3d4e30b35d",
 };
 
-export function buildApolloParams(icp: ICPConfig) {
+// Apollo only accepts predefined employee range buckets
+const APOLLO_EMPLOYEE_BUCKETS = [
+  "1,10", "11,20", "21,50", "51,100", "101,200", "201,500", "501,1000",
+  "1001,2000", "2001,5000", "5001,10000", "10001,",
+];
+
+function getApolloEmployeeRanges(min: number, max: number): string[] {
+  return APOLLO_EMPLOYEE_BUCKETS.filter((bucket) => {
+    const [lo, hi] = bucket.split(",").map(Number);
+    const bucketMax = hi || Infinity;
+    return bucketMax >= min && lo <= max;
+  });
+}
+
+export function buildApolloParams(icp: ICPConfig): ApolloSearchParams {
   // Resolve technology name to Apollo UID for proper tech stack filtering
   const techUid = TECHNOLOGY_UIDS[icp.requiredTechnology];
 
   return {
     person_titles: icp.decisionMakerTitles,
     person_locations: [icp.geography],
-    organization_num_employees_ranges: [`${icp.employeeRange.min},${icp.employeeRange.max}`],
+    organization_num_employees_ranges: getApolloEmployeeRanges(icp.employeeRange.min, icp.employeeRange.max),
     // Filter by companies that actually have this technology installed
     ...(techUid
       ? { currently_using_any_of_technology_uids: [techUid] }
       : { q_keywords: icp.requiredTechnology }),
     per_page: 100,
+    page: 1,
   };
 }
 
@@ -213,7 +231,7 @@ export function scoreProspect(
 
   const reasons: string[] = [];
 
-  // HubSpot installed is a gate, not a score. Already filtered by Apollo query.
+  // HubSpot installed = already filtered by Apollo query (gate, not scored)
 
   // Decision maker title match
   const title = (person.title || "").toLowerCase();
@@ -299,6 +317,24 @@ export async function runProspectingCycle(): Promise<{
 
   const icp = await getActiveICP();
   const params = buildApolloParams(icp);
+
+  // Pagination: track which page to fetch next via SystemChangelog
+  let nextPage = 1;
+  const lastPageRecord = await prisma.systemChangelog.findFirst({
+    where: { category: "prospecting", changeType: "page_tracker" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (lastPageRecord?.dataEvidence) {
+    const data = safeParseJSON(lastPageRecord.dataEvidence, null) as {
+      nextPage?: number;
+      icpVersion?: number;
+    } | null;
+    // Reset to page 1 if ICP version changed (new search criteria)
+    if (data?.nextPage && data.icpVersion === icp.version) {
+      nextPage = data.nextPage;
+    }
+  }
+  params.page = nextPage;
 
   // Create search record
   const search = await prisma.prospectSearch.create({
@@ -418,6 +454,23 @@ export async function runProspectingCycle(): Promise<{
       data: {
         status: "complete",
         resultsCount: accepted,
+      },
+    });
+
+    // Track pagination: advance to next page, or wrap to page 1 if we've exhausted results
+    const fetchedPage = params.page || 1;
+    const hasMorePages = result.pagination.total_pages > fetchedPage;
+    await prisma.systemChangelog.create({
+      data: {
+        category: "prospecting",
+        changeType: "page_tracker",
+        description: `Fetched page ${fetchedPage}/${result.pagination.total_pages} (${result.pagination.total_entries} total). ${accepted} accepted, ${rejected} rejected.`,
+        dataEvidence: JSON.stringify({
+          nextPage: hasMorePages ? fetchedPage + 1 : 1,
+          icpVersion: icp.version,
+          totalPages: result.pagination.total_pages,
+          totalEntries: result.pagination.total_entries,
+        }),
       },
     });
   } catch (err) {
@@ -695,16 +748,20 @@ export async function seedICPIfEmpty(): Promise<void> {
     orderBy: { version: "desc" },
   });
 
-  // Update existing v1 seed config if weights/threshold are stale
+  // Update existing v1 seed config if ANY config has drifted from the seed
   if (existing && existing.version === 1) {
     const currentConfig = safeParseJSON(existing.apolloSearchParams, null) as ICPConfig | null;
-    if (currentConfig && currentConfig.minimumScore !== SEED_ICP.minimumScore) {
+    // Compare full serialized config to detect any drift: weights, threshold, titles,
+    // employee range, revenue range, geography, technology, job posting keywords, etc.
+    const isStale = currentConfig &&
+      JSON.stringify(currentConfig) !== JSON.stringify(SEED_ICP);
+    if (isStale) {
       await prisma.iCPProfile.update({
         where: { id: existing.id },
         data: { apolloSearchParams: JSON.stringify(SEED_ICP) },
       });
       invalidateICPCache();
-      console.log("[icp-engine] Updated stale ICP v1 config with new weights/threshold");
+      console.log("[icp-engine] Updated stale ICP v1 config (detected config drift from seed)");
     }
     return;
   }

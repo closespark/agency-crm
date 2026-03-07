@@ -5,14 +5,13 @@ import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { SearchInput } from "@/components/shared/search-input";
 import { DataTable, type Column } from "@/components/shared/data-table";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { PageLoader } from "@/components/ui/loading";
 import { useDebounce } from "@/hooks/use-debounce";
 import { api, buildQueryString } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
-import { Plus, AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 
 interface TicketRow {
   id: string;
@@ -160,12 +159,9 @@ export default function TicketsPage() {
     <div>
       <PageHeader
         title="Tickets"
-        description="Manage support tickets and service requests"
+        description="AI-triaged support tickets and service requests"
         actions={
-          <Button onClick={() => router.push("/tickets/new")}>
-            <Plus className="h-4 w-4" />
-            New Ticket
-          </Button>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 

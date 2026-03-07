@@ -218,6 +218,7 @@ export async function processTranscript(meetingId: string): Promise<void> {
     include: {
       company: true,
       deals: { where: { stage: { notIn: ["closed_won", "closed_lost"] } }, take: 1 },
+      activities: { orderBy: { createdAt: "desc" }, take: 10 },
     },
   });
   if (!contact) throw new Error("Contact not found");
@@ -225,9 +226,40 @@ export async function processTranscript(meetingId: string): Promise<void> {
   // Get pre-meeting brief if available
   const brief = await prisma.meetingBrief.findUnique({ where: { meetingId } });
 
-  const deal = contact.deals[0];
+  let deal = contact.deals[0];
 
-  // Run AI analysis
+  // Auto-create deal if none exists — a completed meeting is a strong signal
+  if (!deal) {
+    deal = await prisma.deal.create({
+      data: {
+        name: `${contact.firstName} ${contact.lastName} - Discovery`,
+        stage: "discovery",
+        pipeline: "new_business",
+        probability: 10,
+        stageEnteredAt: new Date(),
+        contactId: contact.id,
+        companyId: contact.companyId,
+      },
+    });
+    console.log(`[meeting-lifecycle] Auto-created deal for contact ${contact.id} after meeting transcript received`);
+  }
+
+  // Advance contact to SQL if below (meeting completed = strong qualification signal)
+  const contactStageOrder = ["subscriber", "lead", "mql", "sql", "opportunity", "customer", "evangelist"];
+  const currentIdx = contactStageOrder.indexOf(contact.lifecycleStage);
+  const sqlIdx = contactStageOrder.indexOf("sql");
+  if (currentIdx >= 0 && currentIdx < sqlIdx) {
+    await advanceContactStage(
+      contact.id,
+      "sql",
+      "transcript_analysis",
+      "Meeting completed — advancing to SQL"
+    ).catch((err) => {
+      console.warn(`[meeting-lifecycle] Lifecycle advance to SQL skipped for ${contact.id}:`, err instanceof Error ? err.message : err);
+    });
+  }
+
+  // Run AI analysis with full contact + deal context
   const result = await runAIJob("transcript_analyzer", "analyze_transcript", {
     transcript: meeting.transcript.rawTranscript,
     contact: {
@@ -235,16 +267,40 @@ export async function processTranscript(meetingId: string): Promise<void> {
       email: contact.email,
       jobTitle: contact.jobTitle,
       company: contact.company?.name,
+      industry: contact.company?.industry,
       lifecycleStage: contact.lifecycleStage,
+      leadScore: contact.leadScore,
+      fitScore: contact.fitScore,
+      engagementScore: contact.engagementScore,
+      bant: {
+        budget: contact.bantBudget,
+        authority: contact.bantAuthority,
+        need: contact.bantNeed,
+        timeline: contact.bantTimeline,
+        score: contact.bantScore,
+      },
+      recentActivity: contact.activities?.map((a) => ({
+        type: a.type,
+        subject: a.subject,
+        date: a.createdAt.toISOString(),
+      })) || [],
     },
-    deal: deal ? { name: deal.name, stage: deal.stage, amount: deal.amount } : null,
+    deal: {
+      name: deal.name,
+      stage: deal.stage,
+      amount: deal.amount,
+      probability: deal.probability,
+      pipeline: deal.pipeline,
+      painPoints: deal.painPoints,
+      scopeOfWork: deal.scopeOfWork,
+    },
     preMeetingBrief: brief ? {
       painPoints: brief.painPoints,
       recommendedAngle: brief.recommendedAngle,
       likelyObjections: brief.likelyObjections,
     } : null,
     meetingTitle: meeting.title,
-  }, { contactId, dealId: deal?.id });
+  }, { contactId, dealId: deal.id });
 
   const analysis = result.output as TranscriptAnalysis;
 
@@ -268,15 +324,13 @@ export async function processTranscript(meetingId: string): Promise<void> {
   });
 
   // === 4. UPDATE CRM FROM TRANSCRIPT ===
-  await updateCrmFromAnalysis(contact.id, deal?.id || null, analysis);
+  await updateCrmFromAnalysis(contact.id, deal.id, analysis);
 
   // === 5. SEND FOLLOW-UP EMAIL ===
   await sendFollowUpEmail(contact.id, meetingId, analysis);
 
   // === 6. AUTO-ADVANCE DEAL + PANDADOCS ===
-  if (deal) {
-    await handleDealProgression(deal.id, contact.id, analysis);
-  }
+  await handleDealProgression(deal.id, contact.id, analysis);
 
   // Log to activity timeline
   await prisma.activity.create({
@@ -305,7 +359,6 @@ async function updateCrmFromAnalysis(
 
   // Update contact BANT fields
   const contactUpdate: Record<string, unknown> = {
-    engagementScore: { increment: 15 }, // Meeting attendance = high engagement
     scoreDirty: true,
   };
 
@@ -318,6 +371,10 @@ async function updateCrmFromAnalysis(
     where: { id: contactId },
     data: contactUpdate,
   });
+
+  // Capped score increment for meeting attendance
+  const { incrementContactScore } = await import("@/lib/score-utils");
+  await incrementContactScore(contactId, 15);
 
   // Create action item tasks
   const admin = await prisma.user.findFirst({ where: { role: "admin" } });

@@ -1,10 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
 import { PageHeader } from "@/components/shared/page-header";
 import { SearchInput } from "@/components/shared/search-input";
-import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Pagination } from "@/components/ui/pagination";
 import { PageLoader, EmptyState } from "@/components/ui/loading";
@@ -52,11 +50,9 @@ export default function CampaignsPage() {
     <div>
       <PageHeader
         title="Campaigns"
-        description="Create and manage marketing campaigns"
+        description="AI-managed marketing campaigns"
         actions={
-          <Link href="/marketing/campaigns/new">
-            <Button>New Campaign</Button>
-          </Link>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 
@@ -98,12 +94,7 @@ export default function CampaignsPage() {
       ) : campaigns.length === 0 ? (
         <EmptyState
           title="No campaigns found"
-          description="Create your first campaign to get started"
-          action={
-            <Link href="/marketing/campaigns/new">
-              <Button>New Campaign</Button>
-            </Link>
-          }
+          description="Managed autonomously by AI. Campaigns will appear after the next autopilot cycle."
         />
       ) : (
         <>

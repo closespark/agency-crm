@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { SearchInput } from "@/components/shared/search-input";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { PageLoader } from "@/components/ui/loading";
@@ -143,11 +142,9 @@ export default function BlogListPage() {
     <div>
       <PageHeader
         title="Blog Posts"
-        description="Manage your blog content"
+        description="AI-managed blog content"
         actions={
-          <Button onClick={() => router.push("/cms/blog/new")}>
-            New Post
-          </Button>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 

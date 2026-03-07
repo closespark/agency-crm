@@ -6,14 +6,13 @@ import { PageHeader } from "@/components/shared/page-header";
 import { SearchInput } from "@/components/shared/search-input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Pagination } from "@/components/ui/pagination";
 import { PageLoader, EmptyState } from "@/components/ui/loading";
 import { useDebounce } from "@/hooks/use-debounce";
 import { api, buildQueryString } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
-import { Plus, FileText, Eye, ThumbsUp } from "lucide-react";
+import { FileText, Eye, ThumbsUp } from "lucide-react";
 
 interface ArticleRow {
   id: string;
@@ -89,10 +88,7 @@ export default function KnowledgePage() {
         title="Knowledge Base"
         description="Help articles and documentation"
         actions={
-          <Button onClick={() => router.push("/knowledge/new")}>
-            <Plus className="h-4 w-4" />
-            New Article
-          </Button>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 
@@ -121,13 +117,7 @@ export default function KnowledgePage() {
         <EmptyState
           icon={<FileText className="h-12 w-12" />}
           title="No articles found"
-          description="Create your first knowledge base article to help your customers."
-          action={
-            <Button onClick={() => router.push("/knowledge/new")}>
-              <Plus className="h-4 w-4" />
-              New Article
-            </Button>
-          }
+          description="Managed autonomously by AI. Articles will appear after the next autopilot cycle."
         />
       ) : (
         <div>

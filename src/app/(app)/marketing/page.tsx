@@ -29,7 +29,7 @@ export default async function MarketingHubPage() {
     {
       title: "Campaigns",
       href: "/marketing/campaigns",
-      description: "Create and manage marketing campaigns",
+      description: "AI-managed marketing campaigns",
       stats: [
         { label: "Total", value: campaignCount },
         { label: "Active", value: activeCampaigns },
@@ -38,13 +38,13 @@ export default async function MarketingHubPage() {
     {
       title: "Email Templates",
       href: "/marketing/templates",
-      description: "Design reusable email templates",
+      description: "AI-generated email templates",
       stats: [{ label: "Templates", value: templateCount }],
     },
     {
       title: "Forms",
       href: "/marketing/forms",
-      description: "Build forms to capture leads",
+      description: "AI-managed lead capture forms",
       stats: [
         { label: "Forms", value: formCount },
         { label: "Submissions", value: totalSubmissions },
@@ -53,7 +53,7 @@ export default async function MarketingHubPage() {
     {
       title: "Workflows",
       href: "/marketing/workflows",
-      description: "Automate marketing processes",
+      description: "AI-managed automation workflows",
       stats: [
         { label: "Total", value: totalWorkflows },
         { label: "Active", value: activeWorkflows },
@@ -62,13 +62,13 @@ export default async function MarketingHubPage() {
     {
       title: "Contact Lists",
       href: "/marketing/lists",
-      description: "Organize contacts into targeted lists",
+      description: "AI-managed contact segmentation",
       stats: [{ label: "Lists", value: listCount }],
     },
     {
       title: "Sequences",
       href: "/marketing/sequences",
-      description: "Set up automated email sequences",
+      description: "AI-generated outreach sequences",
       stats: [{ label: "Sequences", value: sequenceCount }],
     },
   ];
@@ -80,7 +80,7 @@ export default async function MarketingHubPage() {
           Marketing Hub
         </h1>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          Manage campaigns, templates, forms, workflows, and contact lists
+          Managed autonomously by AI. View campaign, template, and workflow status below.
         </p>
       </div>
 

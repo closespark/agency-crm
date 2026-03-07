@@ -165,6 +165,16 @@ export const instantly = {
       instantlyFetch<{ items: unknown[] }>("/leads", {
         params: { campaign_id: campaignId, email },
       }),
+
+    /**
+     * Delete (remove) a lead from a campaign — DELETE /leads
+     * This removes the specific lead without affecting other leads in the campaign.
+     */
+    delete: (campaignId: string, email: string) =>
+      instantlyFetch<unknown>("/leads", {
+        method: "DELETE",
+        body: { campaign_id: campaignId, email },
+      }),
   },
 
   accounts: {

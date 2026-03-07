@@ -138,11 +138,9 @@ export default function MediaPage() {
     <div>
       <PageHeader
         title="Media Library"
-        description="Manage your media assets"
+        description="AI-managed media assets"
         actions={
-          <Button onClick={() => setShowAddModal(true)}>
-            Add Media
-          </Button>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 

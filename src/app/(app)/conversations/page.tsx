@@ -146,6 +146,7 @@ export default function ConversationsPage() {
 
   return (
     <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
+      {/* AI manages conversations autonomously */}
       {/* Left panel - conversation list */}
       <div className="w-96 shrink-0">
         <ConversationList

@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Building2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Building2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/page-header";
@@ -154,12 +153,9 @@ export default function CompaniesPage() {
     <div>
       <PageHeader
         title="Companies"
-        description="Manage your company records"
+        description="Auto-created from prospect data"
         actions={
-          <Button onClick={() => router.push("/companies/new")}>
-            <Plus className="h-4 w-4" />
-            Add Company
-          </Button>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 

@@ -85,11 +85,13 @@ export async function POST(request: NextRequest) {
         phone: body.phone || undefined,
         jobTitle: body.jobTitle || undefined,
         source: body.source || "inbound",
-        engagementScore: { increment: 20 },
-        leadScore: { increment: 20 },
         scoreDirty: true,
       },
     });
+
+    // Cap score increment at 100
+    const { incrementContactScore } = await import("@/lib/score-utils");
+    await incrementContactScore(contact.id, 20);
 
     // 3. If company provided, find or create Company by name
     let companyId: string | null = null;

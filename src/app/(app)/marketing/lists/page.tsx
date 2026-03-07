@@ -111,9 +111,9 @@ export default function ListsPage() {
     <div>
       <PageHeader
         title="Contact Lists"
-        description="Organize contacts into targeted lists"
+        description="AI-managed contact segmentation"
         actions={
-          <Button onClick={() => setShowNewModal(true)}>New List</Button>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 

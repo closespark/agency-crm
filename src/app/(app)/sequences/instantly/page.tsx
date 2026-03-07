@@ -107,11 +107,9 @@ export default function InstantlyPage() {
     <div>
       <PageHeader
         title="Instantly Campaigns"
-        description="Manage email campaigns synced with Instantly.ai"
+        description="AI-managed email campaigns synced with Instantly.ai"
         actions={
-          <Button onClick={() => setPushModalOpen(true)}>
-            Push Sequence to Instantly
-          </Button>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 

@@ -113,10 +113,13 @@ export async function POST(request: NextRequest) {
         firstName: body.firstName,
         lastName: body.lastName,
         jobTitle: body.jobTitle || undefined,
-        engagementScore: { increment: 30 },
         scoreDirty: true,
       },
     });
+
+    // Capped score increment for booking engagement
+    const { incrementContactScore } = await import("@/lib/score-utils");
+    await incrementContactScore(contact.id, 30);
 
     // Advance to SQL via lifecycle engine (forward-only — won't downgrade)
     await advanceContactStage(

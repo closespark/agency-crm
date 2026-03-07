@@ -12,13 +12,29 @@ export async function POST(request: NextRequest) {
     }
 
     const payload = await request.json();
+    const payloadStr = JSON.stringify(payload);
+
+    // Idempotency: check if this exact event was already processed (within 5 min window)
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const duplicate = await prisma.rawEventLog.findFirst({
+      where: {
+        source: "instantly",
+        eventType: (payload.event_type as string) || "unknown",
+        rawPayload: payloadStr,
+        createdAt: { gte: fiveMinAgo },
+        processed: true,
+      },
+    });
+    if (duplicate) {
+      return NextResponse.json({ status: "ok", deduplicated: true });
+    }
 
     // Log raw event BEFORE processing — replayable event stream
     const rawLog = await prisma.rawEventLog.create({
       data: {
         source: "instantly",
         eventType: (payload.event_type as string) || "unknown",
-        rawPayload: JSON.stringify(payload),
+        rawPayload: payloadStr,
       },
     });
 
@@ -128,15 +144,18 @@ export async function POST(request: NextRequest) {
           },
         });
 
-        // Bump engagement score for opens (not leadScore — leadScore = fitScore + engagementScore)
-        await prisma.contact.update({
-          where: { id: contact.id },
-          data: {
-            engagementScore: { increment: 1 },
-            leadScore: { increment: 1 },
-            scoreDirty: true,
-          },
-        });
+        // Bump engagement score for opens, capped at 100
+        const openContact = await prisma.contact.findUnique({ where: { id: contact.id }, select: { engagementScore: true, leadScore: true } });
+        if (openContact) {
+          await prisma.contact.update({
+            where: { id: contact.id },
+            data: {
+              engagementScore: Math.min(100, openContact.engagementScore + 1),
+              leadScore: Math.min(100, openContact.leadScore + 1),
+              scoreDirty: true,
+            },
+          });
+        }
 
         await markProcessed(contact?.id);
         return NextResponse.json({ status: "ok" });
@@ -161,15 +180,18 @@ export async function POST(request: NextRequest) {
           },
         });
 
-        // Clicks are higher intent than opens — write to engagementScore
-        await prisma.contact.update({
-          where: { id: contact.id },
-          data: {
-            engagementScore: { increment: 3 },
-            leadScore: { increment: 3 },
-            scoreDirty: true,
-          },
-        });
+        // Clicks are higher intent than opens, capped at 100
+        const clickContact = await prisma.contact.findUnique({ where: { id: contact.id }, select: { engagementScore: true, leadScore: true } });
+        if (clickContact) {
+          await prisma.contact.update({
+            where: { id: contact.id },
+            data: {
+              engagementScore: Math.min(100, clickContact.engagementScore + 3),
+              leadScore: Math.min(100, clickContact.leadScore + 3),
+              scoreDirty: true,
+            },
+          });
+        }
 
         await markProcessed(contact?.id);
         return NextResponse.json({ status: "ok" });
@@ -213,10 +235,20 @@ export async function POST(request: NextRequest) {
               }),
             },
           });
-        }
 
-        // Mark enrollment as unsubscribed
-        if (enrollment) {
+          // Set global opt-out (CAN-SPAM/GDPR compliance across ALL channels)
+          await prisma.contact.update({
+            where: { id: contact.id },
+            data: { globalOptOut: true, optOutAt: new Date() },
+          });
+
+          // Cancel ALL active enrollments for this contact (not just current one)
+          await prisma.sequenceEnrollment.updateMany({
+            where: { contactId: contact.id, status: "active" },
+            data: { status: "unsubscribed" },
+          });
+        } else if (enrollment) {
+          // Fallback: mark just this enrollment
           await prisma.sequenceEnrollment.update({
             where: { id: enrollment.id },
             data: { status: "unsubscribed" },

@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { SearchInput } from "@/components/shared/search-input";
 import { DataTable, type Column } from "@/components/shared/data-table";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageLoader } from "@/components/ui/loading";
@@ -149,19 +148,9 @@ export default function SequencesPage() {
     <div>
       <PageHeader
         title="Sales Sequences"
-        description="Manage outreach sequences and enrollments"
+        description="AI-generated outreach sequences and enrollments"
         actions={
-          <>
-            <Button
-              variant="outline"
-              onClick={() => router.push("/sequences/new?mode=ai")}
-            >
-              Generate with AI
-            </Button>
-            <Button onClick={() => router.push("/sequences/new")}>
-              Create Manual
-            </Button>
-          </>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 

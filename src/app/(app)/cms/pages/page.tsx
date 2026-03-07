@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { SearchInput } from "@/components/shared/search-input";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { PageLoader } from "@/components/ui/loading";
@@ -110,11 +109,9 @@ export default function PagesListPage() {
     <div>
       <PageHeader
         title="Pages"
-        description="Manage your website pages"
+        description="AI-managed website pages"
         actions={
-          <Button onClick={() => router.push("/cms/pages/new")}>
-            New Page
-          </Button>
+          <span className="text-sm text-zinc-500">Managed autonomously by AI</span>
         }
       />
 

@@ -80,16 +80,10 @@ export async function POST(request: NextRequest) {
             },
           });
 
-          // Bump contact engagement score (viewing a proposal/contract = high intent)
+          // Bump contact engagement score (viewing a proposal/contract = high intent), capped at 100
           if (localDoc.contactId) {
-            await prisma.contact.update({
-              where: { id: localDoc.contactId },
-              data: {
-                engagementScore: { increment: 5 },
-                leadScore: { increment: 5 },
-                scoreDirty: true,
-              },
-            });
+            const { incrementContactScore } = await import("@/lib/score-utils");
+            await incrementContactScore(localDoc.contactId, 5);
           }
 
           results.push({ event: eventName, status: "processed" });
@@ -142,16 +136,10 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // Bump engagement score for completion (highest signal)
+          // Bump engagement score for completion (highest signal), capped at 100
           if (localDoc.contactId) {
-            await prisma.contact.update({
-              where: { id: localDoc.contactId },
-              data: {
-                engagementScore: { increment: 10 },
-                leadScore: { increment: 10 },
-                scoreDirty: true,
-              },
-            });
+            const { incrementContactScore } = await import("@/lib/score-utils");
+            await incrementContactScore(localDoc.contactId, 10);
           }
 
           results.push({ event: eventName, status: "processed" });
