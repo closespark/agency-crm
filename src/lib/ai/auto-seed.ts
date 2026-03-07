@@ -126,11 +126,12 @@ const DEFAULT_WORKFLOWS = [
   },
   {
     name: "Lead Score Alert — Hot Lead",
-    description: "Notify the team and create a task when a lead score crosses 80",
+    description: "Notify the team and advance lifecycle when a lead score crosses 80",
     trigger: JSON.stringify({ type: "lead_score_threshold", conditions: { above: 80 } }),
     actions: JSON.stringify([
       { type: "create_task", config: { title: "Hot lead — reach out immediately", dueInDays: 0, priority: "urgent" } },
-      { type: "update_contact", config: { stage: "qualified" } },
+      { type: "update_lifecycle_stage", config: { stage: "mql" } },
+      { type: "send_notification", config: { message: "Hot lead detected — score above 80. Review and reach out ASAP." } },
     ]),
     isActive: true,
   },
@@ -165,10 +166,11 @@ const DEFAULT_WORKFLOWS = [
   },
   {
     name: "Email Reply — Advance Stage",
-    description: "When a prospect replies to an email, move them to engaged stage and create a follow-up task",
+    description: "When a prospect replies to an email, advance to MQL, analyze the reply, and create a follow-up task",
     trigger: JSON.stringify({ type: "email_replied", conditions: {} }),
     actions: JSON.stringify([
-      { type: "update_contact", config: { stage: "engaged" } },
+      { type: "ai_analyze", config: { type: "reply" } },
+      { type: "update_lifecycle_stage", config: { stage: "mql" } },
       { type: "create_task", config: { title: "Respond to prospect reply", dueInDays: 0, priority: "high" } },
     ]),
     isActive: true,
@@ -192,6 +194,49 @@ const DEFAULT_WORKFLOWS = [
       { type: "create_task", config: { title: "Add to long-term nurture list", dueInDays: 3, priority: "low" } },
     ]),
     isActive: false,
+  },
+  {
+    name: "Sequence Completed — Advance & Notify",
+    description: "When a prospect finishes a sequence, advance their stage and create a review task",
+    trigger: JSON.stringify({ type: "sequence_completed", conditions: {} }),
+    actions: JSON.stringify([
+      { type: "score_contact", config: {} },
+      { type: "update_lifecycle_stage", config: { stage: "sql" } },
+      { type: "create_task", config: { title: "Sequence completed — review prospect and decide next steps", dueInDays: 1, priority: "high" } },
+      { type: "send_notification", config: { message: "A prospect has completed their outreach sequence. Review for next steps." } },
+    ]),
+    isActive: true,
+  },
+  {
+    name: "MQL → SQL — Create Discovery Deal",
+    description: "When a contact advances to SQL, auto-create a deal at the discovery stage",
+    trigger: JSON.stringify({ type: "contact_stage_changed", conditions: { to: "sql" } }),
+    actions: JSON.stringify([
+      { type: "create_deal", config: { stage: "discovery", pipeline: "default" } },
+      { type: "create_task", config: { title: "Schedule discovery call with new SQL", dueInDays: 1, priority: "high" } },
+    ]),
+    isActive: true,
+  },
+  {
+    name: "New Lead — Score & Enrich",
+    description: "When a contact moves from subscriber to lead, run AI scoring and analysis",
+    trigger: JSON.stringify({ type: "contact_stage_changed", conditions: { to: "lead" } }),
+    actions: JSON.stringify([
+      { type: "score_contact", config: {} },
+      { type: "ai_analyze", config: { type: "contact" } },
+    ]),
+    isActive: true,
+  },
+  {
+    name: "Deal Moved to Proposal — Prep Docs",
+    description: "When a deal advances to proposal stage, create preparation tasks",
+    trigger: JSON.stringify({ type: "deal_stage_changed", conditions: { to: "proposal" } }),
+    actions: JSON.stringify([
+      { type: "create_task", config: { title: "Draft proposal document", dueInDays: 2, priority: "high" } },
+      { type: "create_task", config: { title: "Prepare pricing and scope breakdown", dueInDays: 2, priority: "high" } },
+      { type: "send_notification", config: { message: "Deal moved to proposal stage — time to prepare docs." } },
+    ]),
+    isActive: true,
   },
 ];
 
