@@ -430,17 +430,25 @@ async function seedSequences(): Promise<number> {
   return created;
 }
 
+// Exported so the API can trigger it on-demand
+export { seedWorkflows as seedWorkflowsIncremental };
+
 async function seedWorkflows(): Promise<number> {
-  const existingCount = await prisma.workflow.count();
-  if (existingCount > 0) {
-    console.log(`[auto-seed] ${existingCount} workflows already exist, skipping`);
+  // Get existing workflow names so we can add missing ones without duplicating
+  const existing = await prisma.workflow.findMany({ select: { name: true } });
+  const existingNames = new Set(existing.map((w) => w.name));
+
+  const toCreate = DEFAULT_WORKFLOWS.filter((wf) => !existingNames.has(wf.name));
+
+  if (toCreate.length === 0) {
+    console.log(`[auto-seed] All ${DEFAULT_WORKFLOWS.length} workflows already exist`);
     return 0;
   }
 
-  console.log(`[auto-seed] Creating ${DEFAULT_WORKFLOWS.length} default workflows...`);
+  console.log(`[auto-seed] Creating ${toCreate.length} missing workflows (${existingNames.size} already exist)...`);
   let created = 0;
 
-  for (const wf of DEFAULT_WORKFLOWS) {
+  for (const wf of toCreate) {
     try {
       await prisma.workflow.create({ data: wf });
       created++;
