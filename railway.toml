@@ -20,13 +20,7 @@
 #   Env var: REDIS_URL (auto-populated via Railway reference variable)
 
 [build]
-builder = "nixpacks"
-
-[build.nixpacks]
-aptPkgs = []
-
-[build.nixpacks.envs]
-NIXPACKS_NODE_VERSION = "22.16.0"
+builder = "RAILPACK"
 
 [deploy]
 healthcheckPath = "/api/health"
