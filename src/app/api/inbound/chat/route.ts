@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
           lastName: body.lastName || undefined,
           phone: body.phone || undefined,
           jobTitle: body.jobTitle || undefined,
-          engagementScore: 25,
+          engagementScore: { increment: 25 },
           scoreDirty: true,
         },
       });

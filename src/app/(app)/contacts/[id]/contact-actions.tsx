@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 
@@ -29,14 +29,6 @@ export default function ContactActions({ contactId }: ContactActionsProps) {
 
   return (
     <div className="flex items-center gap-2">
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => router.push(`/contacts/${contactId}/edit`)}
-      >
-        <Pencil className="h-4 w-4" />
-        Edit
-      </Button>
       <Button
         variant="destructive"
         size="sm"

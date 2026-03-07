@@ -36,6 +36,7 @@ model User {
   notifications Notification[]
   assignedTickets Ticket[]       @relation("TicketAssignee")
   assignedConversations Conversation[] @relation("ConversationAssignee")
+  organizedMeetings Meeting[] @relation("MeetingOrganizer")
 }
 
 model Account {
@@ -162,7 +163,7 @@ model Contact {
   updatedAt      DateTime @updatedAt
 
   owner      User?      @relation("ContactOwner", fields: [ownerId], references: [id])
-  company    Company?   @relation(fields: [companyId], references: [id])
+  company    Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
   deals      Deal[]
   activities Activity[]
   tickets    Ticket[]
@@ -177,6 +178,9 @@ model Contact {
   pageViews  PageView[]
   pandaDocuments PandaDocument[]
   aiConversationLogs AIConversationLog[]
+  conversations Conversation[]
+  meetings   Meeting[]
+  feedbackSurveys FeedbackSurvey[]
 
   @@index([companyId])
   @@index([ownerId])
@@ -257,7 +261,7 @@ model Lead {
   updatedAt     DateTime @updatedAt
 
   contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  company  Company? @relation(fields: [companyId], references: [id])
+  company  Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
 
   @@index([contactId])
   @@index([companyId])
@@ -318,10 +322,11 @@ model Deal {
 
   owner      User?      @relation("DealOwner", fields: [ownerId], references: [id])
   contact    Contact?   @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  company    Company?   @relation(fields: [companyId], references: [id])
+  company    Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
   activities Activity[]
   quotes     Quote[]
   aiConversationLogs AIConversationLog[]
+  feedbackSurveys FeedbackSurvey[]
 
   @@index([contactId])
   @@index([companyId])
@@ -381,7 +386,8 @@ model ClientLifecycle {
   updatedAt   DateTime @updatedAt
 
   contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  company  Company? @relation(fields: [companyId], references: [id])
+  company  Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  feedbackSurveys FeedbackSurvey[]
 
   @@index([contactId])
   @@index([companyId])
@@ -439,7 +445,7 @@ model Activity {
 
   user    User     @relation(fields: [userId], references: [id])
   contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  deal    Deal?    @relation(fields: [dealId], references: [id])
+  deal    Deal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
 
   @@index([contactId])
   @@index([dealId])
@@ -520,6 +526,8 @@ model Comment {
 
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id])
+
+  @@index([ticketId])
 }
 
 model KnowledgeArticle {
@@ -544,6 +552,13 @@ model FeedbackSurvey {
   dealId    String?
   clientLifecycleId String? // link to client lifecycle for post-sale surveys
   createdAt DateTime @default(now())
+
+  contact          Contact?          @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal             Deal?             @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  clientLifecycle  ClientLifecycle?  @relation(fields: [clientLifecycleId], references: [id], onDelete: SetNull)
+
+  @@index([contactId])
+  @@index([dealId])
 }
 
 // ============================================
@@ -596,8 +611,10 @@ model FormSubmission {
   data      String   // JSON
   createdAt DateTime @default(now())
 
-  form    Form     @relation(fields: [formId], references: [id])
+  form    Form     @relation(fields: [formId], references: [id], onDelete: Cascade)
   contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([formId])
 }
 
 model Workflow {
@@ -681,7 +698,12 @@ model Meeting {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  contact     Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  organizer   User?    @relation("MeetingOrganizer", fields: [organizerId], references: [id], onDelete: SetNull)
   transcript  MeetingTranscript?
+
+  @@index([contactId])
+  @@index([organizerId])
 }
 
 model MeetingTranscript {
@@ -715,7 +737,9 @@ model Quote {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  deal Deal @relation(fields: [dealId], references: [id])
+  deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([dealId])
 }
 
 // ============================================
@@ -733,9 +757,11 @@ model Conversation {
   updatedAt DateTime @updatedAt
 
   assignee User?    @relation("ConversationAssignee", fields: [assigneeId], references: [id])
+  contact  Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
   messages Message[]
 
   @@index([assigneeId])
+  @@index([contactId])
 }
 
 model Message {
@@ -751,6 +777,8 @@ model Message {
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user         User?        @relation(fields: [userId], references: [id])
   contact      Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId])
 }
 
 model Notification {
@@ -758,7 +786,7 @@ model Notification {
   userId    String
   title     String
   body      String?
-  type      String   // deal_update, task_due, mention, assignment
+  type      String   // deal_update, task_due, mention, assignment, workflow
   resourceType String?
   resourceId   String?
   isRead    Boolean  @default(false)
@@ -843,6 +871,8 @@ model WebhookEvent {
   createdAt     DateTime @default(now())
 
   integration Integration @relation(fields: [integrationId], references: [id])
+
+  @@index([integrationId])
 }
 
 // ============================================
@@ -1005,7 +1035,7 @@ model AIConversationLog {
   createdAt       DateTime @default(now())
 
   contact  Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  deal     Deal?    @relation(fields: [dealId], references: [id])
+  deal     Deal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
 
   @@index([contactId])
   @@index([dealId])
@@ -1471,6 +1501,8 @@ model DashboardWidget {
   position    String // JSON
 
   dashboard Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+
+  @@index([dashboardId])
 }
 
 model SavedReport {

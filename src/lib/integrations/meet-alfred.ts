@@ -176,7 +176,7 @@ export const meetAlfred = {
      * Add a lead to a campaign.
      * This is one of the few write operations Alfred supports via API.
      */
-    add: (
+    add: async (
       campaignId: string,
       leads: {
         linkedin_url: string;
@@ -187,18 +187,20 @@ export const meetAlfred = {
       }[]
     ) => {
       // Alfred's add-lead endpoint accepts one lead at a time
-      // We serialize calls to respect rate limits
-      return Promise.all(
-        leads.map((lead) =>
-          alfredFetch("/add-new-lead", {
+      // Serialize calls to respect rate limits
+      const results = [];
+      for (const lead of leads) {
+        results.push(
+          await alfredFetch("/add-new-lead", {
             method: "POST",
             body: {
               campaign_id: campaignId,
               ...lead,
             },
           })
-        )
-      );
+        );
+      }
+      return results;
     },
 
     /** List leads */
@@ -235,7 +237,7 @@ export const meetAlfred = {
   // to our webhook endpoint.
   // ---------------------------------------------------------------------------
   parseWebhook: (payload: Record<string, unknown>) => ({
-    eventType: payload.event as string,
+    eventType: (payload.event_type || payload.event) as string,
     campaignId: payload.campaign_id as string,
     linkedinUrl: payload.linkedin_url as string,
     message: payload.message as string | undefined,

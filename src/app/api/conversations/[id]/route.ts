@@ -51,6 +51,11 @@ export async function PATCH(
   const body = await request.json();
   const { status, assigneeId } = body;
 
+  const existing = await prisma.conversation.findUnique({ where: { id } });
+  if (!existing) {
+    return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+  }
+
   const updateData: Record<string, unknown> = {};
   if (status) updateData.status = status;
   if (assigneeId !== undefined) updateData.assigneeId = assigneeId;

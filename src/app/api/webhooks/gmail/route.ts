@@ -17,9 +17,14 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  // Verify this is from Google (Pub/Sub includes a subscription field)
+  // Verify this is from Google (check subscription matches our configured one)
   if (!body.message?.data || !body.subscription) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+  }
+
+  const { verifyGmailWebhook } = await import("@/lib/webhook-verify");
+  if (!(await verifyGmailWebhook(body.subscription))) {
+    return NextResponse.json({ error: "Invalid subscription" }, { status: 401 });
   }
 
   // Decode the notification

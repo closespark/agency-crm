@@ -18,6 +18,12 @@ import {
 import { processTranscript } from "@/lib/ai/meeting-lifecycle";
 
 export async function POST(request: NextRequest) {
+  // Verify webhook signature
+  const { verifyTldvWebhook } = await import("@/lib/webhook-verify");
+  if (!(await verifyTldvWebhook(request))) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
   let payload: TldvWebhookPayload;
   try {
     payload = await request.json();

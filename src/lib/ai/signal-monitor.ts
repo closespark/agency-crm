@@ -7,6 +7,15 @@ import { apollo } from "@/lib/integrations/apollo";
 import { runAIJob } from "./job-runner";
 import { safeParseJSON } from "@/lib/safe-json";
 
+/** Parse size ranges like "11-50" to midpoint (30), or plain numbers */
+function parseSizeRange(size: string | null | undefined): number | null {
+  if (!size) return null;
+  const match = size.match(/^(\d+)-(\d+)$/);
+  if (match) return Math.round((parseInt(match[1]) + parseInt(match[2])) / 2);
+  const num = parseInt(size);
+  return isNaN(num) ? null : num;
+}
+
 interface SignalResult {
   signalType: string;
   description: string;
@@ -238,7 +247,7 @@ export async function watchContact(contactId: string): Promise<void> {
   if (contact.company?.domain) {
     watches.push({
       type: "hiring_spike",
-      triggerConfig: JSON.stringify({ domain: contact.company.domain, lastKnownSize: parseInt(contact.company.size || "0") || null }),
+      triggerConfig: JSON.stringify({ domain: contact.company.domain, lastKnownSize: parseSizeRange(contact.company.size) }),
       autoAction: JSON.stringify({ type: "update_score", config: { delta: 20 } }),
     });
     watches.push({

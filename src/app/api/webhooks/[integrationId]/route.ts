@@ -25,6 +25,14 @@ export async function POST(
     );
   }
 
+  // Verify webhook secret if configured for this integration
+  const { verifyWebhookSecret } = await import("@/lib/webhook-verify");
+  const secretHeader = request.headers.get("x-webhook-secret");
+  const secretKey = `${integration.name.toUpperCase()}_WEBHOOK_SECRET`;
+  if (!(await verifyWebhookSecret(secretHeader, integration.name, secretKey))) {
+    return NextResponse.json({ error: "Invalid webhook secret" }, { status: 401 });
+  }
+
   let payload: unknown;
   try {
     payload = await request.json();

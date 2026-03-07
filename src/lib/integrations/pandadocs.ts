@@ -137,8 +137,8 @@ interface PandaDocsStatusResponse {
   expiration_date: string | null;
 }
 
-interface PandaDocsDownloadResponse {
-  url: string;
+interface PandaDocsDownloadLinkResponse {
+  download_link: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -337,20 +337,21 @@ export async function getDocumentStatus(pandaDocId: string) {
 
 /**
  * Returns a download URL for the completed document.
+ * Uses /download-link (returns JSON) instead of /download (returns binary PDF).
  */
 export async function downloadDocument(pandaDocId: string) {
-  const response = await pandadocsFetch<PandaDocsDownloadResponse>(
-    `/documents/${pandaDocId}/download`,
+  const response = await pandadocsFetch<PandaDocsDownloadLinkResponse>(
+    `/documents/${pandaDocId}/download-link`,
     { method: "GET" }
   );
 
   // Update local record with download URL
   await prisma.pandaDocument.update({
     where: { pandaDocId },
-    data: { downloadUrl: response.url },
+    data: { downloadUrl: response.download_link },
   });
 
-  return response.url;
+  return response.download_link;
 }
 
 /**

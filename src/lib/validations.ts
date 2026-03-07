@@ -43,7 +43,7 @@ export const dealSchema = z.object({
 export const ticketSchema = z.object({
   subject: z.string().min(1, "Subject is required"),
   description: z.string().optional(),
-  status: z.string().default("open"),
+  status: z.string().default("new"),
   priority: z.string().default("medium"),
   category: z.string().optional(),
   pipeline: z.string().default("support"),

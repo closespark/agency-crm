@@ -397,7 +397,7 @@ export async function trackSequencePerformance(): Promise<void> {
           replyRate: sent > 0 ? replies.length / sent : null,
           positiveReplyRate: sent > 0 ? positiveReplies.length / sent : null,
           subjectLine: step.subject,
-          messageAngle: step.body.substring(0, 200),
+          messageAngle: (step.body || (step as Record<string, unknown>).angle as string || "").substring(0, 200),
           periodStart,
           periodEnd,
         },
@@ -505,7 +505,7 @@ Return JSON: { subject: string, body: string, reasoning: string }`,
     const rewrite = result.output as { subject: string; body: string; reasoning: string };
 
     // Apply the rewrite
-    const previousBody = steps[worstStep].body;
+    const previousBody = steps[worstStep].body || (steps[worstStep] as Record<string, unknown>).angle as string || "";
     const previousSubject = steps[worstStep].subject;
     steps[worstStep].body = rewrite.body;
     if (rewrite.subject) steps[worstStep].subject = rewrite.subject;
@@ -522,7 +522,7 @@ Return JSON: { subject: string, body: string, reasoning: string }`,
         changeType: "step_rewritten",
         description: `${seq.name} step ${worstStep + 1} rewritten — positive reply rate was ${(worstRate * 100).toFixed(1)}%`,
         previousValue: JSON.stringify({ subject: previousSubject, body: previousBody.substring(0, 500) }),
-        newValue: JSON.stringify({ subject: rewrite.subject, body: rewrite.body.substring(0, 500) }),
+        newValue: JSON.stringify({ subject: rewrite.subject, body: (rewrite.body || "").substring(0, 500) }),
         dataEvidence: rewrite.reasoning,
         weekNumber: getISOWeekNumber(new Date()),
       },

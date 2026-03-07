@@ -27,9 +27,9 @@ const AVAILABLE_INTEGRATIONS = [
   { name: "pandadocs", type: "api_key" },
   { name: "tldv", type: "api_key" },
   { name: "vapi", type: "api_key" },
-  { name: "zapier_linkedin", type: "webhook_url" },
-  { name: "zapier_twitter", type: "webhook_url" },
-  { name: "zapier_generic", type: "webhook_url" },
+  { name: "zapier_linkedin", type: "webhook" },
+  { name: "zapier_twitter", type: "webhook" },
+  { name: "zapier_generic", type: "webhook" },
 ];
 
 export default function IntegrationsPage() {

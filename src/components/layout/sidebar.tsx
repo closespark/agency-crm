@@ -6,24 +6,11 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   Users,
-  Building2,
-  Handshake,
   KanbanSquare,
-  Ticket,
-  Mail,
-  Megaphone,
-  FileText,
   Settings,
   Search,
   Plug,
-  BookOpen,
-  BarChart3,
-  CheckSquare,
   Brain,
-  PenLine,
-  Crosshair,
-  ListOrdered,
-  Workflow,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -35,61 +22,13 @@ interface NavItem {
   icon: React.ElementType;
 }
 
-interface NavGroup {
-  label: string;
-  items: NavItem[];
-}
-
-const navGroups: NavGroup[] = [
-  {
-    label: "Core",
-    items: [
-      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-      { label: "AI Autopilot", href: "/ai", icon: Brain },
-    ],
-  },
-  {
-    label: "CRM",
-    items: [
-      { label: "Contacts", href: "/contacts", icon: Users },
-      { label: "Companies", href: "/companies", icon: Building2 },
-      { label: "Deals", href: "/deals", icon: Handshake },
-      { label: "Pipeline", href: "/pipeline", icon: KanbanSquare },
-      { label: "Tasks", href: "/tasks", icon: CheckSquare },
-    ],
-  },
-  {
-    label: "Outreach",
-    items: [
-      { label: "Prospecting", href: "/prospecting", icon: Crosshair },
-      { label: "Sequences", href: "/sequences", icon: ListOrdered },
-      { label: "Workflows", href: "/workflows", icon: Workflow },
-    ],
-  },
-  {
-    label: "Operations",
-    items: [
-      { label: "Tickets", href: "/tickets", icon: Ticket },
-      { label: "Conversations", href: "/conversations", icon: Mail },
-    ],
-  },
-  {
-    label: "Growth",
-    items: [
-      { label: "Content Engine", href: "/content", icon: PenLine },
-      { label: "Marketing", href: "/marketing", icon: Megaphone },
-      { label: "CMS", href: "/cms", icon: FileText },
-      { label: "Knowledge Base", href: "/knowledge", icon: BookOpen },
-    ],
-  },
-  {
-    label: "System",
-    items: [
-      { label: "Reports", href: "/reports", icon: BarChart3 },
-      { label: "Integrations", href: "/integrations", icon: Plug },
-      { label: "Settings", href: "/settings", icon: Settings },
-    ],
-  },
+const navItems: NavItem[] = [
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { label: "AI Autopilot", href: "/ai", icon: Brain },
+  { label: "Pipeline", href: "/pipeline", icon: KanbanSquare },
+  { label: "Contacts", href: "/contacts", icon: Users },
+  { label: "Integrations", href: "/integrations", icon: Plug },
+  { label: "Settings", href: "/settings", icon: Settings },
 ];
 
 export function Sidebar() {
@@ -134,40 +73,31 @@ export function Sidebar() {
       )}
 
       <nav className="flex-1 overflow-y-auto px-3 py-3" aria-label="Main navigation">
-        {navGroups.map((group) => (
-          <div key={group.label} className="mb-3">
-            {!collapsed && (
-              <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-                {group.label}
-              </p>
-            )}
-            <ul className="space-y-0.5">
-              {group.items.map((item) => {
-                const isActive =
-                  pathname === item.href ||
-                  pathname.startsWith(item.href + "/");
-                const Icon = item.icon;
-                return (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      className={cn(
-                        "flex items-center gap-3 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                        isActive
-                          ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
-                          : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
-                      )}
-                      title={collapsed ? item.label : undefined}
-                    >
-                      <Icon size={16} />
-                      {!collapsed && item.label}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
+        <ul className="space-y-0.5">
+          {navItems.map((item) => {
+            const isActive =
+              pathname === item.href ||
+              pathname.startsWith(item.href + "/");
+            const Icon = item.icon;
+            return (
+              <li key={item.href}>
+                <Link
+                  href={item.href}
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    isActive
+                      ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                      : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                  )}
+                  title={collapsed ? item.label : undefined}
+                >
+                  <Icon size={18} />
+                  {!collapsed && item.label}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
       </nav>
     </aside>
   );

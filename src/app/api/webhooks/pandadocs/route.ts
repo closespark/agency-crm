@@ -8,6 +8,12 @@ import { advanceDealStage } from "@/lib/ai/lifecycle-engine";
 
 export async function POST(request: NextRequest) {
   try {
+    // Verify webhook signature
+    const { verifyPandaDocsWebhook } = await import("@/lib/webhook-verify");
+    if (!(await verifyPandaDocsWebhook(request))) {
+      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+    }
+
     const payload = await request.json();
 
     // Log raw event BEFORE processing — replayable event stream

@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
         firstName: body.firstName,
         lastName: body.lastName,
         jobTitle: body.jobTitle || undefined,
-        engagementScore: 30,
+        engagementScore: { increment: 30 },
         scoreDirty: true,
       },
     });

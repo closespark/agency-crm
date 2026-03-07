@@ -61,15 +61,17 @@ export async function POST(request: NextRequest) {
   // If contact exists, log activity and mark score dirty
   if (contact) {
     const adminUser = await prisma.user.findFirst({ where: { role: "admin" } });
-    await prisma.activity.create({
-      data: {
-        type: "note",
-        subject: "Newsletter subscription",
-        body: `Subscribed to newsletter from website`,
-        userId: adminUser?.id || "",
-        contactId: contact.id,
-      },
-    });
+    if (adminUser) {
+      await prisma.activity.create({
+        data: {
+          type: "note",
+          subject: "Newsletter subscription",
+          body: `Subscribed to newsletter from website`,
+          userId: adminUser.id,
+          contactId: contact.id,
+        },
+      });
+    }
     await prisma.contact.update({
       where: { id: contact.id },
       data: { scoreDirty: true },

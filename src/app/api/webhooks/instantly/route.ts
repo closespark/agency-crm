@@ -5,6 +5,12 @@ import { analyzeReply } from "@/lib/ai/reply-analyzer";
 
 export async function POST(request: NextRequest) {
   try {
+    // Verify webhook signature
+    const { verifyInstantlyWebhook } = await import("@/lib/webhook-verify");
+    if (!(await verifyInstantlyWebhook(request))) {
+      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+    }
+
     const payload = await request.json();
 
     // Log raw event BEFORE processing — replayable event stream
@@ -99,7 +105,7 @@ export async function POST(request: NextRequest) {
 
         // Note: analyzeReply already creates AIConversationLog and AIInsight for meeting_request
 
-        markProcessed(contact.id);
+        await markProcessed(contact.id);
         return NextResponse.json({ status: "ok", intent: analysis.intent });
       }
 

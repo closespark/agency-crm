@@ -5,6 +5,12 @@ import { analyzeReply } from "@/lib/ai/reply-analyzer";
 
 export async function POST(request: NextRequest) {
   try {
+    // Verify webhook secret
+    const { verifyVapiWebhook } = await import("@/lib/webhook-verify");
+    if (!(await verifyVapiWebhook(request))) {
+      return NextResponse.json({ error: "Invalid secret" }, { status: 401 });
+    }
+
     const payload = await request.json();
 
     // Log raw event before processing

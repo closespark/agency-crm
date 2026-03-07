@@ -59,6 +59,13 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json();
 
+  if (!body.type || !body.title || !body.description || !body.resourceType || !body.resourceId) {
+    return NextResponse.json(
+      { error: "type, title, description, resourceType, and resourceId are required" },
+      { status: 400 }
+    );
+  }
+
   const insight = await prisma.aIInsight.create({
     data: {
       type: body.type,

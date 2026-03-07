@@ -156,7 +156,7 @@ export function evaluateTrigger(
 export async function executeAction(
   action: WorkflowAction,
   context: ActionContext
-): Promise<void> {
+): Promise<"wait" | void> {
   const integrationOk = await checkIntegration(action.type);
   if (!integrationOk) return;
 
@@ -461,8 +461,8 @@ export async function executeAction(
           });
         }
       }
-      // Return after scheduling — remaining actions execute when the task fires
-      return;
+      // Signal caller to stop executing remaining actions
+      return "wait";
     }
 
     default:
@@ -507,13 +507,38 @@ export async function processWorkflows(event: WorkflowEvent): Promise<number> {
       data: event.data,
     };
 
-    // Execute each action in sequence
-    for (const action of actions) {
+    // Execute each action in sequence — stop if a wait action is hit
+    for (let i = 0; i < actions.length; i++) {
       try {
-        await executeAction(action, context);
+        const result = await executeAction(actions[i], context);
+        if (result === "wait") {
+          // Store remaining actions (after the wait) in the task for later resume
+          const remainingActions = actions.slice(i + 1);
+          if (remainingActions.length > 0) {
+            // Update the most recent workflow_resume task with remaining actions
+            const resumeTask = await prisma.task.findFirst({
+              where: { type: "workflow_resume", status: "pending" },
+              orderBy: { createdAt: "desc" },
+            });
+            if (resumeTask) {
+              const existing = JSON.parse(resumeTask.description || "{}");
+              await prisma.task.update({
+                where: { id: resumeTask.id },
+                data: {
+                  description: JSON.stringify({
+                    ...existing,
+                    remainingActions,
+                    context,
+                  }),
+                },
+              });
+            }
+          }
+          break;
+        }
       } catch (err) {
         console.error(
-          `Workflow "${workflow.name}" action "${action.type}" failed:`, err
+          `Workflow "${workflow.name}" action "${actions[i].type}" failed:`, err
         );
       }
     }

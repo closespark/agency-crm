@@ -64,10 +64,10 @@ export async function PUT(
 
   // Track resolved timestamp
   const updateData: Record<string, unknown> = { ...data };
-  if (data.status === "resolved" && existing.status !== "resolved") {
+  if (data.status === "closed" && existing.status !== "closed") {
     updateData.resolvedAt = new Date();
   }
-  if (data.status && data.status !== "resolved") {
+  if (data.status && data.status !== "closed") {
     updateData.resolvedAt = null;
   }
 

@@ -264,12 +264,13 @@ export async function processHandoffQueue(): Promise<number> {
 
       // Only log activity and mark as sent AFTER confirmed Gmail delivery
       const adminUser = await prisma.user.findFirst({ where: { role: "admin" } });
+      if (!adminUser) throw new Error("No admin user found — cannot log activity");
       await prisma.activity.create({
         data: {
           type: "email",
           subject: touchpoint.subject,
           body: touchpoint.body,
-          userId: adminUser?.id || "",
+          userId: adminUser.id,
           contactId: handoff.contactId,
         },
       });

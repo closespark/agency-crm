@@ -47,6 +47,9 @@ async function tick() {
     // 1. Process scheduled jobs from Redis
     await processScheduledJobs();
 
+    // 1b. Process due workflow resume tasks (from Prisma Task table)
+    await processWorkflowResumeTasks();
+
     // 2. Process sequence queue (due enrollment steps)
     await processSequences();
 
@@ -104,6 +107,38 @@ async function processScheduledJobs() {
   }
 }
 
+async function processWorkflowResumeTasks() {
+  try {
+    const dueTasks = await prisma.task.findMany({
+      where: {
+        type: "workflow_resume",
+        status: "pending",
+        dueDate: { lte: new Date() },
+      },
+    });
+
+    for (const task of dueTasks) {
+      try {
+        const data = JSON.parse(task.description || "{}");
+        if (data.remainingActions && data.context) {
+          await executeJob("workflow_resume", {
+            remainingActions: data.remainingActions,
+            context: data.context,
+          });
+        }
+        await prisma.task.update({
+          where: { id: task.id },
+          data: { status: "completed" },
+        });
+      } catch (err) {
+        console.error(`[worker] workflow resume task ${task.id} failed:`, err);
+      }
+    }
+  } catch (err) {
+    console.error("[worker] workflow resume check error:", err);
+  }
+}
+
 async function executeJob(type: string, payload: Record<string, unknown>) {
   switch (type) {
     case "score_contact": {
@@ -130,10 +165,11 @@ async function executeJob(type: string, payload: Record<string, unknown>) {
       // Resume workflow execution after a wait action
       const { executeAction } = await import("./lib/ai/workflow-engine");
       const context = payload.context as { contactId?: string; dealId?: string; data: Record<string, unknown> };
-      const remainingActions = payload.actions as Array<{ type: string; config: Record<string, unknown> }>;
+      const remainingActions = payload.remainingActions as Array<{ type: string; config: Record<string, unknown> }>;
       if (remainingActions) {
         for (const action of remainingActions) {
-          await executeAction(action as Parameters<typeof executeAction>[0], context);
+          const result = await executeAction(action as Parameters<typeof executeAction>[0], context);
+          if (result === "wait") break; // Another wait — stop here
         }
       }
       break;
@@ -413,16 +449,12 @@ async function maybeDailyAutopilot() {
     // Generate content drafts for any planned calendar items without drafts
     // Calendar is generated Sunday, but drafts should be created daily as needed
     try {
-      const { generateContentDrafts, publishDueContent: publishContent } = await import("./lib/ai/content-engine");
+      const { generateContentDrafts } = await import("./lib/ai/content-engine");
       const drafted = await generateContentDrafts();
       if (drafted > 0) {
         console.log(`[worker] content: generated ${drafted} drafts`);
       }
-      // Also publish any approved content that's due
-      const published = await publishContent();
-      if (published > 0) {
-        console.log(`[worker] content: published ${published} pieces`);
-      }
+      // Publishing is already handled in the main tick loop — no duplicate call here
     } catch (err) {
       console.error("[worker] content generation failed:", err);
     }

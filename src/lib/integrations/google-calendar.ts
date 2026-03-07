@@ -226,10 +226,9 @@ export async function createCalendarEvent(params: {
     attendees.push({ email: params.attendeeEmail });
   }
   event.attendees = attendees;
-  event.sendUpdates = "all";
 
   const res = await fetch(
-    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?sendUpdates=all`,
     {
       method: "POST",
       headers: {

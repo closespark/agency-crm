@@ -21,6 +21,12 @@ export async function POST(request: NextRequest) {
   };
 
   try {
+    // Verify webhook signature
+    const { verifyAlfredWebhook } = await import("@/lib/webhook-verify");
+    if (!(await verifyAlfredWebhook(request))) {
+      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+    }
+
     const payload = await request.json();
 
     // Log raw event BEFORE processing — replayable event stream

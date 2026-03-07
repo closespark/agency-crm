@@ -40,24 +40,7 @@ export default function InstantlyPage() {
   const [dailyLimit, setDailyLimit] = useState("30");
   const [pushing, setPushing] = useState(false);
 
-  const fetchCampaigns = useCallback(async () => {
-    setLoading(true);
-    try {
-      // Fetch Instantly campaigns from local DB
-      const res = await api.get<InstantlyCampaignData[]>(
-        "/sequences/instantly/sync"
-      );
-
-      // The sync endpoint returns data on POST. For listing, we'll use a GET
-      // that returns locally stored campaigns. Since we don't have a separate
-      // listing endpoint, we fetch all sequences and Instantly campaigns together.
-      // For now, we'll load the Instantly campaigns by fetching from Prisma via
-      // the sequences API (which includes Instantly data).
-    } catch {
-      // Handled
-    }
-    setLoading(false);
-  }, []);
+  // Campaign data is loaded via fetchData below
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -69,10 +52,7 @@ export default function InstantlyPage() {
       }>("/sequences?pageSize=100");
 
       if (seqRes.data) {
-        const response = seqRes.data as unknown as {
-          data: SequenceOption[];
-        };
-        setSequences(response.data);
+        setSequences(seqRes.data as unknown as SequenceOption[]);
       }
 
       // Fetch Instantly campaigns (we'll make a direct Prisma query through a custom approach)

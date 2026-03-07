@@ -183,13 +183,14 @@ export async function processSequenceQueue(): Promise<number> {
 
       if (stepExecuted) {
         const adminUser = await prisma.user.findFirst({ where: { role: "admin" } });
+        if (!adminUser) throw new Error("No admin user found — cannot log activity");
         const activityType = currentStep.channel === "call" ? "call" : currentStep.channel === "linkedin" ? "note" : "email";
         await prisma.activity.create({
           data: {
             type: activityType,
             subject: personalized.subject || currentStep.subject,
             body: personalized.body,
-            userId: adminUser?.id || "",
+            userId: adminUser.id,
             contactId: enrollment.contactId,
           },
         });

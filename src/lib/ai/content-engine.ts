@@ -414,6 +414,9 @@ Return JSON: {
     orderBy: { createdAt: "desc" },
   });
 
+  // Schedule blog for Wednesday 9am UTC
+  const blogPublishAt = getNextWeekday(3, 9); // Wednesday
+
   const draft = await prisma.contentDraft.create({
     data: {
       calendarId: calendarEntry?.id,
@@ -422,6 +425,7 @@ Return JSON: {
       body: blog.body,
       voiceScore: voiceScore.score,
       status: "approved", // Always approve — autonomous system
+      publishAt: blogPublishAt,
       metadata: JSON.stringify({
         slug: blog.slug,
         metaDescription: blog.metaDescription,
@@ -480,6 +484,9 @@ Return JSON: {
     orderBy: { createdAt: "desc" },
   });
 
+  // Schedule LinkedIn for Thursday 10am UTC
+  const linkedinPublishAt = getNextWeekday(4, 10); // Thursday
+
   const draft = await prisma.contentDraft.create({
     data: {
       calendarId: calendarEntry?.id,
@@ -488,6 +495,7 @@ Return JSON: {
       body: post.body,
       voiceScore: voiceScore.score,
       status: "approved", // Always approve — autonomous system
+      publishAt: linkedinPublishAt,
       metadata: JSON.stringify({
         hook: post.hook,
         voiceFeedback: voiceScore.feedback,
@@ -537,6 +545,9 @@ Return JSON: {
     orderBy: { createdAt: "desc" },
   });
 
+  // Schedule Twitter for Friday 11am UTC
+  const twitterPublishAt = getNextWeekday(5, 11); // Friday
+
   const draft = await prisma.contentDraft.create({
     data: {
       calendarId: calendarEntry?.id,
@@ -545,6 +556,7 @@ Return JSON: {
       body: JSON.stringify(thread.tweets),
       voiceScore: null,
       status: "approved",
+      publishAt: twitterPublishAt,
       metadata: JSON.stringify({ hook: thread.hook, tweetCount: thread.tweets.length }),
     },
   });
@@ -564,10 +576,7 @@ export async function publishDueContent(): Promise<number> {
   const due = await prisma.contentDraft.findMany({
     where: {
       status: { in: ["approved", "scheduled"] },
-      OR: [
-        { publishAt: { lte: now } },
-        { publishAt: null },
-      ],
+      publishAt: { not: null, lte: now },
     },
     include: { calendar: true },
   });
@@ -985,7 +994,8 @@ Return JSON: {
 function getNextMonday(): Date {
   const now = new Date();
   const day = now.getDay();
-  const daysUntilMonday = day === 0 ? 1 : 8 - day;
+  // day=0 (Sun) → 1, day=1 (Mon) → 7, day=2 (Tue) → 6, ...
+  const daysUntilMonday = day === 0 ? 1 : day === 1 ? 7 : 8 - day;
   const monday = new Date(now);
   monday.setDate(now.getDate() + daysUntilMonday);
   monday.setHours(0, 0, 0, 0);
@@ -998,4 +1008,16 @@ function getNextTuesday7am(): Date {
   tuesday.setDate(monday.getDate() + 1);
   tuesday.setHours(7, 0, 0, 0); // 7 AM UTC
   return tuesday;
+}
+
+/** Get the next occurrence of a specific weekday (1=Mon..5=Fri) at a given hour UTC */
+function getNextWeekday(targetDay: number, hour: number): Date {
+  const now = new Date();
+  const day = now.getDay(); // 0=Sun, 1=Mon, ...
+  let daysAhead = targetDay - day;
+  if (daysAhead <= 0) daysAhead += 7; // Always schedule for next week if today or past
+  const date = new Date(now);
+  date.setDate(now.getDate() + daysAhead);
+  date.setHours(hour, 0, 0, 0);
+  return date;
 }

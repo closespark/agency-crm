@@ -84,11 +84,9 @@ export async function POST(request: NextRequest) {
         lastName: body.lastName,
         phone: body.phone || undefined,
         jobTitle: body.jobTitle || undefined,
-        lifecycleStage: "lead",
-        leadStatus: "new",
         source: body.source || "inbound",
-        engagementScore: 20,
-        leadScore: 20,
+        engagementScore: { increment: 20 },
+        leadScore: { increment: 20 },
         scoreDirty: true,
       },
     });

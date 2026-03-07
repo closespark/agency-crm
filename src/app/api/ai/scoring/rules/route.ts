@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const validCategories = ["demographic", "behavioral", "engagement", "firmographic"];
+  const validCategories = ["demographic", "behavioral", "engagement", "firmographic", "negative", "decay"];
   if (!validCategories.includes(category)) {
     return NextResponse.json(
       { error: `category must be one of: ${validCategories.join(", ")}` },

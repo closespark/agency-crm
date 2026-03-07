@@ -109,7 +109,7 @@ FIT SCORE (0-55, persists forever):
   - NEGATIVE: Personal/generic email domain (-10), competitor domain (-20).
 
 ENGAGEMENT SCORE (0-45, subject to decay):
-  - BEHAVIORAL (0-25): Demo/consultation request (+30), pricing page 2+ visits (+20), case study download (+15), email click (+5), email open (+3).
+  - BEHAVIORAL (0-25): Demo/consultation request (+25), pricing page 2+ visits (+20), case study download (+15), email click (+5), email open (+3). Cap at 25.
   - RECENCY (0-20): Activity in last 7 days (+20), last 14 days (+15), last 30 days (+10), last 60 days (+5), 60+ days (+0).
 
 Total = fitScore + engagementScore (cap at 100).

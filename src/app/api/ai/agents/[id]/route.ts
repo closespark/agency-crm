@@ -37,6 +37,12 @@ export async function PUT(
   }
 
   const { id } = await params;
+
+  const existing = await prisma.aIAgent.findUnique({ where: { id } });
+  if (!existing) {
+    return NextResponse.json({ error: "Agent not found" }, { status: 404 });
+  }
+
   const body = await request.json();
 
   const agent = await prisma.aIAgent.update({

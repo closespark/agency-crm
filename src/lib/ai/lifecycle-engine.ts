@@ -571,6 +571,13 @@ export async function advanceClientStage(
   const cl = await prisma.clientLifecycle.findUnique({ where: { id: clientLifecycleId } });
   if (!cl) return { success: false, error: "Client lifecycle not found" };
 
+  // Enforce forward-only movement (except churned → win_back)
+  const fromIdx = CLIENT_STAGES.indexOf(cl.stage as ClientStage);
+  const toIdx = CLIENT_STAGES.indexOf(toStage);
+  if (fromIdx >= 0 && toIdx >= 0 && toIdx < fromIdx && !(cl.stage === "churned" && toStage === "win_back")) {
+    return { success: false, error: `Cannot move backward from ${cl.stage} to ${toStage}` };
+  }
+
   const now = new Date();
   const history = safeParseJSON<Array<Record<string, unknown>>>(cl.stageHistory, []);
   history.push({

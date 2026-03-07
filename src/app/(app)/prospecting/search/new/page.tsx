@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { ICPForm, type ICPFormData } from "@/components/prospecting/icp-form";
 
-export default function NewICPSearchPage() {
+function NewICPSearchContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const defaultSource = searchParams.get("source") || "";
@@ -81,5 +81,13 @@ export default function NewICPSearchPage() {
         isLoading={loading}
       />
     </div>
+  );
+}
+
+export default function NewICPSearchPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-zinc-400">Loading...</div>}>
+      <NewICPSearchContent />
+    </Suspense>
   );
 }
