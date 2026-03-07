@@ -238,6 +238,112 @@ const DEFAULT_WORKFLOWS = [
     ]),
     isActive: true,
   },
+
+  // ── Outreach & Prospecting workflows ──────────────────────────────────
+
+  {
+    name: "Auto-Enroll High-Fit Prospects in Sequence",
+    description: "When a new lead enters the system, score them and auto-enroll in the cold outreach sequence",
+    trigger: JSON.stringify({ type: "contact_stage_changed", conditions: { to: "lead" } }),
+    actions: JSON.stringify([
+      { type: "score_contact", config: {} },
+      { type: "wait", config: { delayMinutes: 5 } },
+    ]),
+    isActive: false, // Enable after configuring target sequence ID
+  },
+  {
+    name: "Stale Prospect — Archive Warning",
+    description: "After 30 days of no activity, flag unconverted prospects for cleanup",
+    trigger: JSON.stringify({ type: "no_activity", conditions: { days: 30 } }),
+    actions: JSON.stringify([
+      { type: "update_lead_status", config: { status: "unresponsive" } },
+      { type: "create_task", config: { title: "Prospect inactive 30+ days — archive or re-engage?", dueInDays: 0, priority: "medium" } },
+      { type: "send_notification", config: { message: "Stale prospect flagged for review after 30 days of inactivity." } },
+    ]),
+    isActive: true,
+  },
+  {
+    name: "Meeting Booked — Confirmation & Prep Materials",
+    description: "Send a confirmation email with prep materials when a meeting is booked",
+    trigger: JSON.stringify({ type: "meeting_booked", conditions: {} }),
+    actions: JSON.stringify([
+      { type: "send_email", config: { aiGenerate: true, purpose: "Confirm the meeting, share a brief agenda, and ask what their top priorities are so we can prepare", tone: "friendly and professional" } },
+      { type: "ai_analyze", config: { type: "contact" } },
+      { type: "create_task", config: { title: "Prepare meeting brief and research prospect", dueInDays: 0, priority: "high" } },
+    ]),
+    isActive: true,
+  },
+
+  // ── Operations & Client Management workflows ──────────────────────────
+
+  {
+    name: "Client Activation — Request Referral",
+    description: "When a contact becomes a customer, send a thank-you and referral request after a brief delay",
+    trigger: JSON.stringify({ type: "contact_stage_changed", conditions: { to: "customer" } }),
+    actions: JSON.stringify([
+      { type: "wait", config: { delayDays: 14 } },
+      { type: "send_email", config: { aiGenerate: true, purpose: "Thank the client for their partnership, ask if they know anyone who could benefit from similar services, and offer to make introductions easy", tone: "warm and appreciative" } },
+      { type: "create_task", config: { title: "Follow up on referral request", dueInDays: 21, priority: "medium" } },
+    ]),
+    isActive: true,
+  },
+  {
+    name: "Deal Moved to Negotiation — Close Prep",
+    description: "When a deal enters negotiation, create contract prep tasks and alert the team",
+    trigger: JSON.stringify({ type: "deal_stage_changed", conditions: { to: "negotiation" } }),
+    actions: JSON.stringify([
+      { type: "create_task", config: { title: "Prepare contract and pricing terms", dueInDays: 1, priority: "high" } },
+      { type: "create_task", config: { title: "Review deal for any outstanding objections", dueInDays: 0, priority: "high" } },
+      { type: "send_notification", config: { message: "Deal entered negotiation stage — prepare to close." } },
+    ]),
+    isActive: true,
+  },
+
+  // ── Marketing & Content workflows ─────────────────────────────────────
+
+  {
+    name: "Newsletter Engagement — Warm Escalation",
+    description: "When a contact's score crosses 50, escalate from newsletter to active outreach",
+    trigger: JSON.stringify({ type: "lead_score_threshold", conditions: { above: 50 } }),
+    actions: JSON.stringify([
+      { type: "update_lifecycle_stage", config: { stage: "mql" } },
+      { type: "create_task", config: { title: "Engaged newsletter subscriber — review for outreach", dueInDays: 1, priority: "medium" } },
+      { type: "send_notification", config: { message: "Newsletter subscriber crossed score 50 — ready for warm outreach." } },
+    ]),
+    isActive: true,
+  },
+  {
+    name: "Form Submission — Smart Nurture Path",
+    description: "When a form is submitted, score, segment, and route to appropriate follow-up",
+    trigger: JSON.stringify({ type: "form_submitted", conditions: {} }),
+    actions: JSON.stringify([
+      { type: "score_contact", config: {} },
+      { type: "update_lifecycle_stage", config: { stage: "lead" } },
+      { type: "send_email", config: { aiGenerate: true, purpose: "Thank them for their interest, confirm we received their submission, and set expectations for next steps", tone: "warm and professional" } },
+      { type: "create_task", config: { title: "Review new form submission and qualify", dueInDays: 1, priority: "high" } },
+    ]),
+    isActive: true,
+  },
+  {
+    name: "MQL — Send Industry-Specific Content",
+    description: "When a contact reaches MQL, send personalized content based on their profile",
+    trigger: JSON.stringify({ type: "contact_stage_changed", conditions: { to: "mql" } }),
+    actions: JSON.stringify([
+      { type: "ai_analyze", config: { type: "contact" } },
+      { type: "send_email", config: { aiGenerate: true, purpose: "Share a relevant case study or insight based on their industry and pain points. Build trust before the sales conversation.", tone: "helpful and knowledgeable" } },
+    ]),
+    isActive: true,
+  },
+  {
+    name: "Deal Lost — Knowledge Feedback Loop",
+    description: "When a deal is lost, analyze the loss reason and feed insights back to improve future outreach",
+    trigger: JSON.stringify({ type: "deal_stage_changed", conditions: { to: "lost" } }),
+    actions: JSON.stringify([
+      { type: "ai_analyze", config: { type: "deal" } },
+      { type: "create_task", config: { title: "Document loss reason and update ICP/objection playbook", dueInDays: 3, priority: "medium" } },
+    ]),
+    isActive: true,
+  },
 ];
 
 // ============================================

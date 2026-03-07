@@ -3,6 +3,28 @@ import { scoreContact } from "./lead-scorer";
 import { analyzeReply } from "./reply-analyzer";
 import { runAIJob } from "./job-runner";
 import { safeParseJSON } from "@/lib/safe-json";
+import { getKey } from "@/lib/integration-keys";
+
+// ── Integration checks ───────────────────────────────────────────────────
+
+const INTEGRATION_REQUIREMENTS: Partial<Record<ActionType, string[]>> = {
+  send_email: ["GOOGLE_CLIENT_ID"],
+  ai_analyze: ["ANTHROPIC_API_KEY"],
+  score_contact: ["ANTHROPIC_API_KEY"],
+};
+
+async function checkIntegration(actionType: ActionType): Promise<boolean> {
+  const required = INTEGRATION_REQUIREMENTS[actionType];
+  if (!required) return true;
+  for (const key of required) {
+    const val = await getKey(key);
+    if (!val) {
+      console.warn(`[workflow] Skipping "${actionType}" — missing integration: ${key}`);
+      return false;
+    }
+  }
+  return true;
+}
 
 // ── Trigger types ──────────────────────────────────────────────────────────
 
@@ -135,6 +157,9 @@ export async function executeAction(
   action: WorkflowAction,
   context: ActionContext
 ): Promise<void> {
+  const integrationOk = await checkIntegration(action.type);
+  if (!integrationOk) return;
+
   switch (action.type) {
     case "send_email": {
       const config = action.config as {
