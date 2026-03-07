@@ -246,6 +246,19 @@ async function maybeDailyAutopilot() {
     } catch (err) {
       console.error("[worker] ICP optimization failed:", err);
     }
+
+    // Fetch knowledge sources and extract insights daily (not just Sunday audit)
+    try {
+      const { fetchKnowledgeSources, extractInsights } = await import("./lib/ai/knowledge-engine");
+      const fetched = await fetchKnowledgeSources();
+      if (fetched > 0) {
+        console.log(`[worker] knowledge: fetched ${fetched} sources`);
+        const extracted = await extractInsights();
+        console.log(`[worker] knowledge: extracted ${extracted} insights`);
+      }
+    } catch (err) {
+      console.error("[worker] knowledge fetch failed:", err);
+    }
   } catch (err) {
     console.error("[worker] daily autopilot failed:", err);
   } finally {
