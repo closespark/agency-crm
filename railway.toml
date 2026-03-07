@@ -23,7 +23,7 @@
 builder = "nixpacks"
 
 [build.nixpacks]
-nixPkgs = ["nodejs_22"]
+nodeVersion = "22"
 
 [deploy]
 healthcheckPath = "/api/health"
