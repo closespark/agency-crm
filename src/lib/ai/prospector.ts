@@ -250,5 +250,20 @@ export async function convertProspectToContact(prospectId: string): Promise<stri
     console.error(`[prospector] Lead creation failed for ${contact.id}:`, err);
   }
 
+  // Fire workflow events so automations trigger (welcome email, scoring, etc.)
+  try {
+    const { processWorkflows } = await import("./workflow-engine");
+    await processWorkflows({
+      type: "contact_created",
+      data: { contactId: contact.id },
+    });
+    await processWorkflows({
+      type: "contact_stage_changed",
+      data: { contactId: contact.id, from: "subscriber", to: "lead" },
+    });
+  } catch (err) {
+    console.error(`[prospector] Workflow trigger failed for ${contact.id}:`, err);
+  }
+
   return contact.id;
 }

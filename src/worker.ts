@@ -232,6 +232,29 @@ async function maybeDailyAutopilot() {
       const { runProspectingCycle } = await import("./lib/ai/icp-engine");
       const prospecting = await runProspectingCycle();
       console.log(`[worker] prospecting: ${prospecting.accepted} accepted, ${prospecting.rejected} rejected`);
+
+      // Auto-convert new prospects to contacts (full autonomous pipeline)
+      if (prospecting.accepted > 0) {
+        const { convertProspectToContact } = await import("./lib/ai/prospector");
+        const newProspects = await prisma.prospect.findMany({
+          where: { status: "new" },
+          orderBy: { fitScore: "desc" },
+          take: 50,
+        });
+
+        let converted = 0;
+        for (const prospect of newProspects) {
+          try {
+            await convertProspectToContact(prospect.id);
+            converted++;
+          } catch (err) {
+            console.error(`[worker] auto-convert prospect ${prospect.id} failed:`, err);
+          }
+        }
+        if (converted > 0) {
+          console.log(`[worker] auto-converted ${converted} prospects to contacts`);
+        }
+      }
     } catch (err) {
       console.error("[worker] prospecting cycle failed:", err);
     }
