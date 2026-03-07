@@ -23,5 +23,8 @@
 builder = "RAILPACK"
 
 [deploy]
+startCommand = "npx prisma db push --accept-data-loss; cp -r .next/static .next/standalone/.next/static; cp -r public .next/standalone/public 2>/dev/null; node .next/standalone/server.js"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
