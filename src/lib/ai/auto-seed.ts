@@ -110,6 +110,92 @@ const SEQUENCE_SPECS = [
 ];
 
 // ============================================
+// WORKFLOW DEFINITIONS (static, no AI needed)
+// ============================================
+
+const DEFAULT_WORKFLOWS = [
+  {
+    name: "Welcome New Contacts",
+    description: "Automatically send a welcome email when a new contact is created from a form submission",
+    trigger: JSON.stringify({ type: "contact_created", conditions: {} }),
+    actions: JSON.stringify([
+      { type: "send_email", config: { aiGenerate: true, purpose: "Welcome the new contact, introduce Nexus Ops, and invite them to book a discovery call", tone: "warm and professional" } },
+      { type: "create_task", config: { title: "Follow up with new contact", dueInDays: 2, priority: "high" } },
+    ]),
+    isActive: true,
+  },
+  {
+    name: "Lead Score Alert — Hot Lead",
+    description: "Notify the team and create a task when a lead score crosses 80",
+    trigger: JSON.stringify({ type: "lead_score_threshold", conditions: { above: 80 } }),
+    actions: JSON.stringify([
+      { type: "create_task", config: { title: "Hot lead — reach out immediately", dueInDays: 0, priority: "urgent" } },
+      { type: "update_contact", config: { stage: "qualified" } },
+    ]),
+    isActive: true,
+  },
+  {
+    name: "Deal Won — Onboarding Kickoff",
+    description: "When a deal moves to Closed Won, send an onboarding email and create setup tasks",
+    trigger: JSON.stringify({ type: "deal_stage_changed", conditions: { to: "closed_won" } }),
+    actions: JSON.stringify([
+      { type: "send_email", config: { aiGenerate: true, purpose: "Congratulate the client on closing, outline the onboarding process, and share first steps", tone: "excited and professional" } },
+      { type: "create_task", config: { title: "Schedule onboarding kickoff call", dueInDays: 1, priority: "high" } },
+      { type: "create_task", config: { title: "Prepare onboarding docs and credentials", dueInDays: 2, priority: "medium" } },
+    ]),
+    isActive: true,
+  },
+  {
+    name: "Re-engage Stale Leads",
+    description: "When a contact has no activity for 14 days, send a re-engagement email",
+    trigger: JSON.stringify({ type: "no_activity", conditions: { days: 14 } }),
+    actions: JSON.stringify([
+      { type: "send_email", config: { aiGenerate: true, purpose: "Gentle check-in with a stale lead. Offer new value or a reason to reconnect. Give an easy out.", tone: "casual and helpful" } },
+    ]),
+    isActive: true,
+  },
+  {
+    name: "Meeting Booked — Prep Task",
+    description: "Create a preparation task when a meeting is booked",
+    trigger: JSON.stringify({ type: "meeting_booked", conditions: {} }),
+    actions: JSON.stringify([
+      { type: "create_task", config: { title: "Prepare meeting brief and research prospect", dueInDays: 0, priority: "high" } },
+    ]),
+    isActive: true,
+  },
+  {
+    name: "Email Reply — Advance Stage",
+    description: "When a prospect replies to an email, move them to engaged stage and create a follow-up task",
+    trigger: JSON.stringify({ type: "email_replied", conditions: {} }),
+    actions: JSON.stringify([
+      { type: "update_contact", config: { stage: "engaged" } },
+      { type: "create_task", config: { title: "Respond to prospect reply", dueInDays: 0, priority: "high" } },
+    ]),
+    isActive: true,
+  },
+  {
+    name: "Form Submitted — Qualify Lead",
+    description: "When a website form is submitted, score the contact and create a follow-up task",
+    trigger: JSON.stringify({ type: "form_submitted", conditions: {} }),
+    actions: JSON.stringify([
+      { type: "score_contact", config: {} },
+      { type: "create_task", config: { title: "Review and qualify new form submission", dueInDays: 1, priority: "medium" } },
+    ]),
+    isActive: true,
+  },
+  {
+    name: "Deal Lost — Feedback & Nurture",
+    description: "When a deal is lost, send a graceful email and add to nurture sequence",
+    trigger: JSON.stringify({ type: "deal_stage_changed", conditions: { to: "lost" } }),
+    actions: JSON.stringify([
+      { type: "send_email", config: { aiGenerate: true, purpose: "Thank the prospect for their time, ask for brief feedback on why they didn't move forward, and leave the door open for future conversations", tone: "gracious and professional" } },
+      { type: "create_task", config: { title: "Add to long-term nurture list", dueInDays: 3, priority: "low" } },
+    ]),
+    isActive: false,
+  },
+];
+
+// ============================================
 // SEED FUNCTIONS
 // ============================================
 
@@ -193,12 +279,42 @@ async function seedSequences(): Promise<number> {
   return created;
 }
 
+async function seedWorkflows(): Promise<number> {
+  const existingCount = await prisma.workflow.count();
+  if (existingCount > 0) {
+    console.log(`[auto-seed] ${existingCount} workflows already exist, skipping`);
+    return 0;
+  }
+
+  console.log(`[auto-seed] Creating ${DEFAULT_WORKFLOWS.length} default workflows...`);
+  let created = 0;
+
+  for (const wf of DEFAULT_WORKFLOWS) {
+    try {
+      await prisma.workflow.create({ data: wf });
+      created++;
+      console.log(`[auto-seed] Created workflow: ${wf.name}`);
+    } catch (err) {
+      console.error(`[auto-seed] Failed to create workflow "${wf.name}":`, err);
+    }
+  }
+
+  return created;
+}
+
 // ============================================
 // MAIN ENTRY POINT — called by worker on startup
 // ============================================
 
 export async function autoSeedIfEmpty(): Promise<void> {
-  // Check if we've already run auto-seed
+  // Seed workflows first (no API key needed)
+  try {
+    await seedWorkflows();
+  } catch (err) {
+    console.error("[auto-seed] Workflow seed failed:", err);
+  }
+
+  // Check if we've already run AI auto-seed
   const seedLog = await prisma.systemChangelog.findFirst({
     where: { category: "auto_seed", changeType: "completed" },
   });
