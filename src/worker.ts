@@ -8,6 +8,7 @@ import "dotenv/config";
 
 // Force-load Prisma client
 import { prisma } from "./lib/prisma";
+import { getKey } from "./lib/integration-keys";
 
 const TICK_INTERVAL_MS = 30_000; // Check for work every 30 seconds
 const DAILY_AUTOPILOT_HOUR = 6; // Run daily autopilot at 6 AM UTC
@@ -265,6 +266,14 @@ async function start() {
   console.log("[worker] AgencyCRM background worker starting...");
   console.log(`[worker] tick interval: ${TICK_INTERVAL_MS}ms`);
   console.log(`[worker] daily autopilot hour: ${DAILY_AUTOPILOT_HOUR} UTC`);
+
+  // Load API keys from DB into process.env (keys set on /integrations page)
+  try {
+    await getKey("ANTHROPIC_API_KEY"); // triggers cache load for all keys
+    console.log("[worker] integration keys loaded from DB");
+  } catch (err) {
+    console.warn("[worker] failed to load integration keys from DB:", err);
+  }
 
   // Check last autopilot run to avoid re-running on restart
   try {

@@ -17,12 +17,16 @@ interface Integration {
 }
 
 const AVAILABLE_INTEGRATIONS = [
+  { name: "anthropic", type: "api_key" },
+  { name: "apollo", type: "api_key" },
   { name: "instantly", type: "api_key" },
-  { name: "slack", type: "oauth" },
+  { name: "meet_alfred", type: "api_key" },
+  { name: "google", type: "oauth" },
   { name: "google_calendar", type: "oauth" },
   { name: "stripe", type: "api_key" },
-  { name: "mailgun", type: "api_key" },
-  { name: "zapier", type: "webhook" },
+  { name: "pandadocs", type: "api_key" },
+  { name: "tldv", type: "api_key" },
+  { name: "vapi", type: "api_key" },
 ];
 
 export default function IntegrationsPage() {

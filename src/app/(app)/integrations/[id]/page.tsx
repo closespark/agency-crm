@@ -39,12 +39,16 @@ interface EventsMeta {
 }
 
 const DISPLAY_NAMES: Record<string, string> = {
+  anthropic: "Anthropic (Claude AI)",
+  apollo: "Apollo.io",
   instantly: "Instantly",
-  slack: "Slack",
+  meet_alfred: "Meet Alfred",
+  google: "Google (Gmail & OAuth)",
   google_calendar: "Google Calendar",
   stripe: "Stripe",
-  mailgun: "Mailgun",
-  zapier: "Zapier",
+  pandadocs: "PandaDocs",
+  tldv: "tl;dv",
+  vapi: "Vapi.ai",
 };
 
 export default function IntegrationDetailPage({

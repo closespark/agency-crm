@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { clearKeyCache } from "@/lib/integration-keys";
 
 export async function GET(
   _request: NextRequest,
@@ -70,6 +71,11 @@ export async function PUT(
     where: { id },
     data: updateData,
   });
+
+  // Clear cached keys so new values take effect immediately
+  if (updateData.config !== undefined) {
+    clearKeyCache();
+  }
 
   return NextResponse.json({ data: integration });
 }

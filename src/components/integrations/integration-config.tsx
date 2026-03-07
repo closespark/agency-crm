@@ -27,14 +27,23 @@ interface IntegrationConfigProps {
 }
 
 const CONFIG_FIELDS: Record<string, { label: string; placeholder: string; type: string }[]> = {
+  anthropic: [
+    { label: "API Key", placeholder: "sk-ant-...", type: "password" },
+  ],
+  apollo: [
+    { label: "API Key", placeholder: "Enter your Apollo.io API key", type: "password" },
+  ],
   instantly: [
     { label: "API Key", placeholder: "Enter your Instantly API key", type: "password" },
-    { label: "Workspace ID", placeholder: "Enter workspace ID", type: "text" },
+    { label: "Base URL", placeholder: "https://api.instantly.ai/api/v2", type: "text" },
   ],
-  slack: [
-    { label: "Bot Token", placeholder: "xoxb-...", type: "password" },
-    { label: "Signing Secret", placeholder: "Enter signing secret", type: "password" },
-    { label: "Default Channel", placeholder: "#general", type: "text" },
+  meet_alfred: [
+    { label: "API Key", placeholder: "Enter your Meet Alfred API key", type: "password" },
+    { label: "Base URL", placeholder: "https://app.meetalfred.com/api", type: "text" },
+  ],
+  google: [
+    { label: "Client ID", placeholder: "Enter Google OAuth client ID", type: "text" },
+    { label: "Client Secret", placeholder: "Enter Google OAuth client secret", type: "password" },
   ],
   google_calendar: [
     { label: "Client ID", placeholder: "Enter OAuth client ID", type: "text" },
@@ -45,13 +54,16 @@ const CONFIG_FIELDS: Record<string, { label: string; placeholder: string; type: 
     { label: "Secret Key", placeholder: "sk_live_...", type: "password" },
     { label: "Webhook Secret", placeholder: "whsec_...", type: "password" },
   ],
-  mailgun: [
-    { label: "API Key", placeholder: "Enter Mailgun API key", type: "password" },
-    { label: "Domain", placeholder: "mg.yourdomain.com", type: "text" },
-    { label: "From Email", placeholder: "noreply@yourdomain.com", type: "email" },
+  pandadocs: [
+    { label: "API Key", placeholder: "Enter your PandaDocs API key", type: "password" },
+    { label: "Proposal Template ID", placeholder: "Template ID for proposals", type: "text" },
+    { label: "Contract Template ID", placeholder: "Template ID for contracts", type: "text" },
   ],
-  zapier: [
-    { label: "API Key", placeholder: "Enter Zapier API key", type: "password" },
+  tldv: [
+    { label: "API Key", placeholder: "Enter your tl;dv API key", type: "password" },
+  ],
+  vapi: [
+    { label: "API Key", placeholder: "Enter your Vapi.ai API key", type: "password" },
   ],
 };
 
