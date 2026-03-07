@@ -51,12 +51,12 @@ export default function SequencesPage() {
   const fetchSequences = useCallback(async () => {
     setLoading(true);
     const qs = buildQueryString({ page, search });
-    const res = await api.get<SequencesResponse>(`/sequences${qs}`);
+    const res = await api.get<SequenceItem[]>(`/sequences${qs}`);
     if (res.data) {
-      const response = res.data as unknown as SequencesResponse;
-      setSequences(response.data);
-      setTotalPages(response.meta.totalPages);
-      setStats(response.stats);
+      setSequences(res.data);
+      setTotalPages(res.meta?.totalPages || 1);
+      const statsData = (res as unknown as { stats?: typeof stats }).stats;
+      if (statsData) setStats(statsData);
     }
     setLoading(false);
   }, [page, search]);

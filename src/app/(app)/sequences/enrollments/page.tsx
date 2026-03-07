@@ -63,18 +63,11 @@ export default function EnrollmentsPage() {
       search,
       filters: status ? { status } : {},
     });
-    const res = await api.get<{
-      data: Enrollment[];
-      meta: { page: number; pageSize: number; total: number; totalPages: number };
-    }>(`/sequences/enrollments${qs}`);
+    const res = await api.get<Enrollment[]>(`/sequences/enrollments${qs}`);
 
     if (res.data) {
-      const response = res.data as unknown as {
-        data: Enrollment[];
-        meta: { totalPages: number };
-      };
-      setEnrollments(response.data);
-      setTotalPages(response.meta.totalPages);
+      setEnrollments(res.data);
+      setTotalPages(res.meta?.totalPages || 1);
     }
     setLoading(false);
   }, [page, search, status]);
