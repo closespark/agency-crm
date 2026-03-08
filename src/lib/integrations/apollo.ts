@@ -155,6 +155,7 @@ export interface ApolloSearchParams {
   organization_num_employees_ranges?: string[];
   organization_locations?: string[];
   currently_using_any_of_technology_uids?: string[];
+  q_organization_keyword_tags?: string[];
   q_keywords?: string;
   page?: number;
   per_page?: number;
@@ -167,17 +168,17 @@ export interface ApolloSearchParams {
 export const apollo = {
   /**
    * Search for people matching criteria.
-   *
-   * CORRECTED: The v1 API search endpoint is /mixed_people/api_search (not /mixed_people/search).
-   * The /api_search variant is optimized for programmatic use.
-   * Method: POST
+   * Endpoint: POST /mixed_people/search
+   * Response: { people: [...], pagination: { total_entries, total_pages, page, per_page } }
    */
   peopleSearch: (params: ApolloSearchParams) =>
     apolloFetchPost<{
       people: ApolloPersonResult[];
-      pagination: { total_entries: number; total_pages: number; page: number };
+      pagination: { total_entries: number; total_pages: number; page: number; per_page: number };
+      // Apollo sometimes returns flat total_entries instead of nested pagination
+      total_entries?: number;
     }>(
-      "/mixed_people/api_search",
+      "/mixed_people/search",
       {
         method: "POST",
         body: {

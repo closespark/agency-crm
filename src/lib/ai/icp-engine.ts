@@ -175,17 +175,12 @@ function getApolloEmployeeRanges(min: number, max: number): string[] {
 }
 
 export function buildApolloParams(icp: ICPConfig): ApolloSearchParams {
-  // Resolve technology name to Apollo UID for proper tech stack filtering
-  const techUid = TECHNOLOGY_UIDS[icp.requiredTechnology];
-
   return {
     person_titles: icp.decisionMakerTitles,
     person_locations: [icp.geography],
     organization_num_employees_ranges: getApolloEmployeeRanges(icp.employeeRange.min, icp.employeeRange.max),
-    // Filter by companies that actually have this technology installed
-    ...(techUid
-      ? { currently_using_any_of_technology_uids: [techUid] }
-      : { q_keywords: icp.requiredTechnology }),
+    // Use keyword tag filter for technology — more reliable than hardcoded UIDs
+    q_organization_keyword_tags: [icp.requiredTechnology],
     per_page: 100,
     page: 1,
   };
@@ -352,9 +347,12 @@ export async function runProspectingCycle(): Promise<{
   try {
     console.log("[icp-engine] Apollo search params:", JSON.stringify(params));
     const result = await apolloClient.peopleSearch(params);
-    console.log("[icp-engine] Apollo raw response keys:", Object.keys(result || {}), "people count:", (result as Record<string, unknown>)?.people ? (result.people as unknown[]).length : "missing");
     const people = result.people || [];
-    const pagination = result.pagination || { total_entries: 0, total_pages: 0, page: 1 };
+    // Apollo response shape varies: sometimes { pagination: { total_entries } }, sometimes { total_entries } at root
+    const totalEntries = result.pagination?.total_entries ?? result.total_entries ?? 0;
+    const totalPages = result.pagination?.total_pages ?? (Math.ceil(totalEntries / (params.per_page || 100)) || 1);
+    const pagination = { total_entries: totalEntries, total_pages: totalPages, page: params.page || 1 };
+    console.log(`[icp-engine] Apollo returned ${people.length} people (${totalEntries} total across ${totalPages} pages)`);
     searched = people.length;
 
     if (searched === 0) {
