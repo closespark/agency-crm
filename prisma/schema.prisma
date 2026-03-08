@@ -150,9 +150,10 @@ model Contact {
   bantLastUpdated DateTime?
   bantGapSummary  String?  // comma-separated missing BANT fields, e.g. "budget, timeline"
 
+  linkedinUrl     String?
   ownerId        String?
   companyId      String?
-  source         String?  // instantly, inbound, referral, organic, paid
+  source         String?  // apollo, inbound, referral, organic, paid
   domainTier     String   @default("cold") // cold = Instantly pre-warmed, warm = branded agency domain
   handoffInProgress Boolean @default(false) // true during cold→warm domain handoff to prevent tick loop race
   globalOptOut    Boolean  @default(false) // CAN-SPAM/GDPR: when true, NO outreach on ANY channel

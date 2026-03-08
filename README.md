@@ -52,7 +52,7 @@ AgencyCRM eliminates 100% of that manual work through autonomous AI agents:
 | **Stripe** | Billing, subscriptions, invoices on closed_won | Revenue |
 | **Vapi** | AI voice agents for inbound/outbound calls | Voice |
 | **tl;dv** | Meeting recording & transcript delivery via webhook | Intelligence |
-| **Meet Alfred** | LinkedIn outreach campaigns | Social selling |
+| **PhantomBuster** | LinkedIn automation — connection requests + follow-up messages via API | Social selling |
 | **Zapier** | LinkedIn/Twitter publishing, generic triggers | Glue layer |
 | **Anthropic Claude** | AI brain powering all 32 autonomous engine files | Intelligence |
 

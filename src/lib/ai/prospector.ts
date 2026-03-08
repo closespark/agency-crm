@@ -192,6 +192,7 @@ export async function convertProspectToContact(prospectId: string): Promise<stri
       email: prospect.email,
       phone: prospect.phone,
       jobTitle: prospect.jobTitle,
+      linkedinUrl: prospect.linkedinUrl,
       companyId,
       source: "apollo",
       lifecycleStage: "lead",

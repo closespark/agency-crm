@@ -238,14 +238,71 @@ export async function processSequenceQueue(): Promise<number> {
           console.error(`[autopilot] Vapi call failed for ${enrollment.contactId}:`, err);
         }
       } else if (currentStep.channel === "linkedin") {
-        // LinkedIn steps are logged as notes — actual delivery depends on Meet Alfred or Zapier
-        stepExecuted = true;
+        // LinkedIn steps delivered via PhantomBuster
+        try {
+          const contactForLinkedIn = await prisma.contact.findUnique({
+            where: { id: enrollment.contactId },
+            select: { linkedinUrl: true, customFields: true },
+          });
+
+          // Try dedicated field first, then fall back to customFields JSON
+          let linkedinUrl = contactForLinkedIn?.linkedinUrl;
+          if (!linkedinUrl && contactForLinkedIn?.customFields) {
+            try {
+              const custom = JSON.parse(contactForLinkedIn.customFields);
+              linkedinUrl = custom.linkedinUrl || custom.linkedin_url || null;
+            } catch { /* ignore parse errors */ }
+          }
+
+          if (!linkedinUrl) {
+            console.warn(`[autopilot] No LinkedIn URL for contact ${enrollment.contactId} — skipping LinkedIn step`);
+          } else {
+            const outreachPhantomId = process.env.PHANTOMBUSTER_OUTREACH_PHANTOM_ID;
+            const messagePhantomId = process.env.PHANTOMBUSTER_MESSAGE_PHANTOM_ID;
+
+            if (!outreachPhantomId && !messagePhantomId) {
+              console.warn(`[autopilot] No PhantomBuster phantom IDs configured — skipping LinkedIn step`);
+            } else {
+              const { phantombuster } = await import("@/lib/integrations/phantombuster");
+
+              // Use Message Sender for existing connections (later steps),
+              // Outreach phantom for first touch (connection request + message)
+              if (enrollment.currentStep === 0 && outreachPhantomId) {
+                // First LinkedIn touch — send connection request with personalized message
+                await phantombuster.linkedin.sendConnectionRequest(
+                  outreachPhantomId,
+                  linkedinUrl,
+                  personalized.body
+                );
+                stepExecuted = true;
+              } else if (messagePhantomId) {
+                // Follow-up — DM existing connection
+                await phantombuster.linkedin.sendMessage(
+                  messagePhantomId,
+                  linkedinUrl,
+                  personalized.body
+                );
+                stepExecuted = true;
+              } else if (outreachPhantomId) {
+                // Only outreach phantom configured — use it for all steps
+                await phantombuster.linkedin.sendConnectionRequest(
+                  outreachPhantomId,
+                  linkedinUrl,
+                  personalized.body
+                );
+                stepExecuted = true;
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`[autopilot] PhantomBuster LinkedIn step failed for ${enrollment.contactId}:`, err);
+        }
       }
 
       if (stepExecuted) {
         const adminUser = await prisma.user.findFirst({ where: { role: "admin" } });
         if (!adminUser) throw new Error("No admin user found — cannot log activity");
-        const activityType = currentStep.channel === "call" ? "call" : currentStep.channel === "linkedin" ? "note" : "email";
+        const activityType = currentStep.channel === "call" ? "call" : currentStep.channel === "linkedin" ? "linkedin" : "email";
         await prisma.activity.create({
           data: {
             type: activityType,
