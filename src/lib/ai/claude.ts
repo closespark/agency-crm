@@ -3,12 +3,25 @@ import { safeParseJSON } from "@/lib/safe-json";
 
 const globalForAnthropic = globalThis as unknown as {
   anthropic: Anthropic | undefined;
+  keysLoaded: boolean | undefined;
 };
 
 function createAnthropic(): Anthropic {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) throw new Error("ANTHROPIC_API_KEY is not set");
   return new Anthropic({ apiKey: key });
+}
+
+// Ensure DB-stored integration keys are loaded into process.env before first use
+async function ensureKeysLoaded(): Promise<void> {
+  if (globalForAnthropic.keysLoaded) return;
+  try {
+    const { getKey } = await import("@/lib/integration-keys");
+    await getKey("ANTHROPIC_API_KEY"); // triggers loadCache → injects into process.env
+  } catch {
+    // DB not available — fall through to env var
+  }
+  globalForAnthropic.keysLoaded = true;
 }
 
 export const anthropic: Anthropic = new Proxy({} as Anthropic, {
@@ -67,6 +80,7 @@ export async function aiComplete({
   maxTokens = 4096,
   temperature = 0.7,
 }: AICompletionOptions): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+  await ensureKeysLoaded();
   return withRetry(async () => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
