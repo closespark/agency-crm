@@ -689,6 +689,47 @@ async function start() {
   lastAutopilotDate = today;
   console.log("[worker] first-boot complete — skipping today's autopilot to avoid double run");
 
+  // One-time repair: reset enrollments that advanced without emails being sent
+  // (cold contacts had steps consumed by Gmail-only send path before Instantly routing was added)
+  try {
+    const repairKey = "enrollment_step_repair_2026_03_08";
+    const alreadyRepaired = await prisma.systemChangelog.findFirst({
+      where: { category: "repair", changeType: repairKey },
+    });
+    if (!alreadyRepaired) {
+      // Find all active enrollments at step > 0 where no outbound activity exists
+      const enrollments = await prisma.sequenceEnrollment.findMany({
+        where: { status: "active", currentStep: { gt: 0 } },
+        select: { id: true, contactId: true, currentStep: true },
+      });
+      let repaired = 0;
+      for (const enr of enrollments) {
+        const hasOutbound = await prisma.aIConversationLog.findFirst({
+          where: { contactId: enr.contactId, direction: "outbound" },
+        });
+        if (!hasOutbound) {
+          await prisma.sequenceEnrollment.update({
+            where: { id: enr.id },
+            data: { currentStep: 0, nextActionAt: new Date() },
+          });
+          repaired++;
+        }
+      }
+      await prisma.systemChangelog.create({
+        data: {
+          category: "repair",
+          changeType: repairKey,
+          description: `Reset ${repaired} enrollments to step 0 (steps advanced without emails sent)`,
+        },
+      });
+      if (repaired > 0) {
+        console.log(`[worker] Repaired ${repaired} enrollments — reset to step 0`);
+      }
+    }
+  } catch (err) {
+    console.error("[worker] enrollment repair failed:", err);
+  }
+
   // Main loop
   const interval = setInterval(tick, TICK_INTERVAL_MS);
 

@@ -272,19 +272,29 @@ export async function processSequenceQueue(): Promise<number> {
         await advanceLeadStage(lead.id, "attempting", "ai_auto", "Outreach activity logged");
       }
 
-      // Advance to next step
-      const nextStep = steps[enrollment.currentStep + 1];
-      await prisma.sequenceEnrollment.update({
-        where: { id: enrollment.id },
-        data: {
-          currentStep: enrollment.currentStep + 1,
-          nextActionAt: nextStep
-            ? new Date(Date.now() + nextStep.delayDays * 24 * 60 * 60 * 1000)
-            : null,
-          status: nextStep ? "active" : "completed",
-          completedAt: nextStep ? null : new Date(),
-        },
-      });
+      // Only advance to next step if the current step was actually executed
+      if (stepExecuted) {
+        const nextStep = steps[enrollment.currentStep + 1];
+        await prisma.sequenceEnrollment.update({
+          where: { id: enrollment.id },
+          data: {
+            currentStep: enrollment.currentStep + 1,
+            nextActionAt: nextStep
+              ? new Date(Date.now() + nextStep.delayDays * 24 * 60 * 60 * 1000)
+              : null,
+            status: nextStep ? "active" : "completed",
+            completedAt: nextStep ? null : new Date(),
+          },
+        });
+      } else {
+        // Step was skipped — retry on next tick (push nextActionAt forward by 5 minutes)
+        await prisma.sequenceEnrollment.update({
+          where: { id: enrollment.id },
+          data: {
+            nextActionAt: new Date(Date.now() + 5 * 60 * 1000),
+          },
+        });
+      }
 
       processed++;
     } catch (err) {
