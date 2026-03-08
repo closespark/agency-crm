@@ -659,6 +659,50 @@ async function start() {
     console.error("[worker] Stage gate seed failed:", err);
   }
 
+  // First-boot prospecting: if zero contacts exist, run a full prospecting + convert cycle now
+  // instead of waiting for the next 6 AM UTC autopilot window.
+  try {
+    const contactCount = await prisma.contact.count();
+    if (contactCount === 0) {
+      console.log("[worker] Zero contacts detected — running first-boot prospecting cycle");
+
+      // Step 1: Pull prospects from Apollo
+      try {
+        const { runProspectingCycle } = await import("./lib/ai/icp-engine");
+        const prospecting = await runProspectingCycle();
+        console.log(`[worker] first-boot prospecting: ${prospecting.accepted} accepted, ${prospecting.rejected} rejected`);
+      } catch (err) {
+        console.error("[worker] first-boot prospecting failed:", err);
+      }
+
+      // Step 2: Auto-convert accepted prospects to contacts + enroll in sequences
+      try {
+        const { convertProspectToContact } = await import("./lib/ai/prospector");
+        const readyProspects = await prisma.prospect.findMany({
+          where: { status: { in: ["new", "verified"] } },
+          orderBy: { fitScore: "desc" },
+        });
+
+        let converted = 0;
+        for (const prospect of readyProspects) {
+          try {
+            await convertProspectToContact(prospect.id);
+            converted++;
+          } catch (err) {
+            console.error(`[worker] first-boot convert prospect ${prospect.id} failed:`, err);
+          }
+        }
+        if (converted > 0) {
+          console.log(`[worker] first-boot: converted ${converted} prospects to contacts`);
+        }
+      } catch (err) {
+        console.error("[worker] first-boot auto-convert failed:", err);
+      }
+    }
+  } catch (err) {
+    console.error("[worker] first-boot prospecting check failed:", err);
+  }
+
   // Main loop
   const interval = setInterval(tick, TICK_INTERVAL_MS);
 
