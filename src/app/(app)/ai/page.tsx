@@ -4,12 +4,10 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Spinner, PageLoader } from "@/components/ui/loading";
+import { PageLoader } from "@/components/ui/loading";
 import { formatDateTime, formatCurrency, parseJSON } from "@/lib/utils";
 import {
   Brain,
-  Play,
-  Pause,
   Send,
   AlertTriangle,
   XCircle,
@@ -92,7 +90,7 @@ const categoryColors: Record<string, string> = {
 export default function AICommandCenter() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [togglingAutopilot, setTogglingAutopilot] = useState(false);
+  // Autopilot is always on — no toggle needed
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -126,25 +124,7 @@ export default function AICommandCenter() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
-  const toggleAutopilot = useCallback(async () => {
-    if (!data) return;
-    setTogglingAutopilot(true);
-    try {
-      const res = await fetch("/api/ai/autopilot", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active: !data.autopilot.isActive }),
-      });
-      const json = await res.json();
-      if (json.data) {
-        setData((prev) =>
-          prev ? { ...prev, autopilot: { isActive: json.data.isActive, lastChangedAt: new Date().toISOString() } } : prev
-        );
-      }
-    } finally {
-      setTogglingAutopilot(false);
-    }
-  }, [data]);
+  // No autopilot toggle — system is fully autonomous
 
   const sendChat = useCallback(async () => {
     if (!chatInput.trim() || chatLoading) return;
@@ -209,17 +189,9 @@ export default function AICommandCenter() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className={`h-2 w-2 rounded-full ${data.autopilot.isActive ? "bg-green-500 animate-pulse" : "bg-zinc-400"}`} />
-            <Button
-              size="sm"
-              variant={data.autopilot.isActive ? "outline" : "default"}
-              onClick={toggleAutopilot}
-              disabled={togglingAutopilot}
-            >
-              {togglingAutopilot ? <Spinner size="sm" /> : data.autopilot.isActive ? <Pause size={14} /> : <Play size={14} />}
-              {data.autopilot.isActive ? "Pause" : "Activate"}
-            </Button>
+          <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
+            <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+            Autonomous
           </div>
         </div>
 

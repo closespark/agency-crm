@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
   const [
     autopilotStatus,
@@ -35,9 +36,9 @@ export async function GET() {
       },
     }),
     prisma.aIJob.findMany({
-      where: { status: "failed", createdAt: { gte: thirtyDaysAgo } },
+      where: { status: "failed", createdAt: { gte: twentyFourHoursAgo } },
       orderBy: { createdAt: "desc" },
-      take: 15,
+      take: 10,
       select: {
         id: true,
         type: true,
