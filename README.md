@@ -1,135 +1,191 @@
-# AgencyCRM
+# AgencyCRM — Autonomous AI-Powered CRM for B2B Sales Automation
 
-Fully autonomous AI-powered CRM for B2B agency founders. Zero button clicking — the system prospects, scores, sequences, and closes on its own.
+> **What is AgencyCRM?** AgencyCRM is a fully autonomous AI CRM that replaces your entire B2B sales stack. It prospects via Apollo.io, scores leads with AI, runs cold email sequences through Instantly.ai, hands off warm leads to Gmail, auto-generates proposals with PandaDocs, and closes deals into Stripe — all without a single button click. Built for solo agency founders who need enterprise-grade sales pipeline automation without the headcount.
 
-## Architecture
+## Why AgencyCRM?
 
-- **Next.js 16** App Router + React 19 — web dashboard
-- **Worker Service** — background processor (30s tick loop + daily autopilot at 6 AM UTC)
-- **Prisma 7 + PostgreSQL** — 75 models, relational data layer
-- **Redis** — job queues, distributed locks, caching
-- **Claude AI (Sonnet 4)** — scoring, BANT extraction, content generation, self-optimization
+Traditional CRMs like HubSpot and Salesforce require constant manual input — logging activities, updating deal stages, writing follow-up emails, scoring leads by hand. According to [Forrester Research](https://www.forrester.com/), sales reps spend only 28% of their time actually selling, with the rest consumed by CRM data entry and administrative tasks.
 
-## Integrations (11)
+AgencyCRM eliminates 100% of that manual work through autonomous AI agents:
+
+- **97 qualified prospects** pulled from Apollo.io on first boot — no manual list building
+- **7-stage contact lifecycle** with AI-enforced forward-only progression and BANT qualification gates
+- **Dual scoring engine** (fitScore + engagementScore) with automatic 25%/month decay and weekly self-calibration
+- **Cold-to-warm domain handoff** — Instantly.ai for cold outreach, automatic transition to Gmail API when intent is detected
+- **Self-optimizing ICP** — weekly AI rewrite of ideal customer profile based on closed deal outcomes
+- **17 daily autonomous tasks** running at 6 AM UTC including prospecting, enrichment, scoring, deal scanning, and content generation
+
+## How AgencyCRM Compares to Other AI CRM Solutions
+
+| Feature | AgencyCRM | HubSpot | Salesforce | Apollo |
+|---|---|---|---|---|
+| Fully autonomous (zero clicks) | Yes | No | No | No |
+| Built-in cold email (Instantly) | Yes | No | No | No |
+| AI lead scoring + BANT extraction | Yes | Partial | Partial | No |
+| Self-optimizing ICP | Yes | No | No | No |
+| Auto-proposal generation | Yes (PandaDocs) | No | No | No |
+| Auto-invoicing on close | Yes (Stripe) | Partial | Partial | No |
+| AI voice agents | Yes (Vapi) | No | No | No |
+| Open source | Yes | No | No | No |
+
+## Tech Stack
+
+| Layer | Technology | Purpose |
+|---|---|---|
+| Frontend | Next.js 16, React 19, Tailwind CSS 4 | App Router dashboard with 70+ pages |
+| Backend | Next.js API Routes, Prisma 7 | 120+ endpoints, 75 database models |
+| Database | PostgreSQL | Relational data, managed on Railway |
+| Queue | Redis (ioredis) | Job queues, distributed locks, caching |
+| AI | Anthropic Claude (Sonnet 4) | Scoring, BANT, content, self-optimization |
+| Worker | Node.js (tsx) | Background processor, 30s tick loop |
+| Auth | NextAuth v5 | JWT-based session management |
+
+## 11 Integrations
 
 | Integration | Purpose | Channel |
 |---|---|---|
-| **Apollo.io** | Prospect discovery & enrichment | Inbound data |
-| **Instantly.ai** | Cold email campaigns (pre-warmed domains) | Cold outreach |
-| **Gmail API** | Warm/branded email send + inbox sync | Warm outreach |
-| **Google Calendar** | Free/busy availability for meeting booking | Scheduling |
-| **PandaDocs** | Auto-generated proposals & contract signing | Deal closing |
+| **Apollo.io** | B2B prospect discovery & enrichment (100 contacts/page) | Inbound data |
+| **Instantly.ai** | Cold email automation with pre-warmed domains | Cold outreach |
+| **Gmail API** | Warm/branded email with inbox sync + push notifications | Warm outreach |
+| **Google Calendar** | Free/busy availability for AI meeting booking | Scheduling |
+| **PandaDocs** | Auto-generated proposals & e-signature contracts | Deal closing |
 | **Stripe** | Billing, subscriptions, invoices on closed_won | Revenue |
-| **Vapi** | AI voice agents (inbound/outbound calls) | Voice |
-| **tl;dv** | Meeting recording & transcript delivery | Intelligence |
-| **Meet Alfred** | LinkedIn outreach campaigns | Social |
+| **Vapi** | AI voice agents for inbound/outbound calls | Voice |
+| **tl;dv** | Meeting recording & transcript delivery via webhook | Intelligence |
+| **Meet Alfred** | LinkedIn outreach campaigns | Social selling |
 | **Zapier** | LinkedIn/Twitter publishing, generic triggers | Glue layer |
-| **Anthropic Claude** | AI brain for all autonomous decisions | Intelligence |
+| **Anthropic Claude** | AI brain powering all 32 autonomous engine files | Intelligence |
 
-## Contact Lifecycle
+## AI-Powered Contact Lifecycle Automation
+
+AgencyCRM enforces a forward-only 7-stage contact lifecycle with AI-managed stage gates:
 
 ```
 subscriber → lead → mql → sql → opportunity → customer → evangelist
 ```
 
-- **Forward-only** — stages never move backward
-- **Dual scoring**: fitScore (persists) + engagementScore (decays 25%/month)
-- **BANT gate**: 3/4 required for MQL → SQL qualification
-- **Domain handoff**: Instantly (cold) → warm intent detected → Gmail (branded)
+- **Forward-only enforcement** — contacts never regress to a previous stage
+- **AI dual scoring**: fitScore (0-55, persists) + engagementScore (0-45, decays 25%/month)
+- **BANT qualification gate** — 3 of 4 BANT criteria (Budget, Authority, Need, Timeline) required for MQL → SQL
+- **Automatic domain handoff** — Instantly.ai handles cold outreach; when warm intent is detected (reply, click, meeting booked), the system transitions the contact to Gmail API for branded follow-up
+- **Channel lock** — one active channel per contact prevents duplicate outreach
 
-## Deal Pipeline
+## Automated B2B Deal Pipeline
 
 ```
 discovery → proposal_sent → negotiation → contract_sent → closed_won / closed_lost
 ```
 
-- PandaDocs auto-generates proposals when deals advance
-- Stripe creates customers/invoices on closed_won
+- PandaDocs auto-generates proposals when deals advance past discovery
+- Stripe automatically creates customers and invoices on closed_won
+- AI deal advisor monitors stalled deals and suggests next actions
+- Client lifecycle tracking continues post-sale: onboarding → active → renewal → expansion
 
-## AI Engine (32 files)
+## AI Engine Architecture (32 Files)
 
-- **Lifecycle Engine** — stage gates, forward-only enforcement
-- **ICP Engine** — ideal customer profile, Apollo search, prospect scoring
-- **Lead Scorer** — AI-powered fit + engagement scoring with bounds enforcement
-- **Self-Optimization** — weekly ICP rewrite, score calibration, gate drift, sequence rewrite
-- **Autopilot** — daily autonomous run (17 tasks)
-- **Content Engine** — AI-generated email copy with full contact intelligence
-- **Signal Monitor** — intent signal detection across channels
-- **Domain Handoff** — automatic cold → warm transition with flag protection
+The AI engine in `src/lib/ai/` contains 32 specialized files organized by function:
 
-## Email Routing
-
-| Contact Tier | Send Channel | Integration |
+| Module | Files | Function |
 |---|---|---|
-| Cold (new prospects) | Instantly | Pre-warmed domains, campaign-based |
-| Warm (engaged/replied) | Gmail API | Branded domain, thread-aware |
+| **Core** | lifecycle-engine, lead-scorer, icp-engine, prospector, autopilot | Stage management, scoring, prospecting |
+| **Self-Optimization** | self-optimization-engine, optimization-thresholds, scoring-feedback | Weekly ICP rewrite, score calibration, gate drift |
+| **Communication** | reply-analyzer, domain-handoff, channel-coordinator, chat-agent | Email analysis, cold→warm transition |
+| **Content** | content-engine, sequence-generator, knowledge-engine, voice-profile | AI-generated emails with anti-hallucination rules |
+| **Intelligence** | signal-monitor, deal-advisor, ticket-intelligence, bant-extractor | Intent detection, deal coaching |
+| **Meeting** | meeting-lifecycle, meeting-brief | Auto-briefs, no-show detection, reminders |
+| **Post-Sale** | client-lifecycle | Onboarding → active → renewal → expansion → at_risk → churned |
 
-Channel lock enforces one active channel per contact. Domain handoff triggers automatically on warm intent signals.
+## Cold Email Automation vs Warm Email Routing
 
-## Worker
+| Contact Tier | Send Channel | Integration | When |
+|---|---|---|---|
+| **Cold** (new prospects from Apollo) | Instantly.ai | Pre-warmed domains, campaign-based | Default for all new contacts |
+| **Warm** (engaged, replied, or meeting booked) | Gmail API | Branded domain, thread-aware | After AI-detected warm intent signal |
 
-Separate Railway service running `npx tsx src/worker.ts`:
+The system enforces channel lock: one prospect, one active channel, one sequence at a time. Domain handoff is fully automatic with crash recovery — if the handoff process fails mid-transition, the contact is automatically unstuck within 2 hours.
 
-- **Tick loop** (30s) — sequence steps, scheduled jobs, meeting lifecycle, content publishing
-- **Daily autopilot** (6 AM UTC) — insights, prospecting, enrichment, conversion, scoring, deal scanning, self-optimization
-- **First-boot** — auto-seeds ICP, sequences, templates; runs immediate prospecting cycle if zero contacts exist
-- **Concurrency guard** — prevents overlapping ticks
-- **Distributed locks** — Redis-based, prevents duplicate autopilot runs across workers
+## Background Worker Service
 
-## Deployment (Railway)
+The worker runs as a separate service (`npx tsx src/worker.ts`) with:
 
-Two services from the same repo:
+- **30-second tick loop** — processes sequence steps, scheduled jobs, meeting lifecycle, content publishing
+- **Daily autopilot at 6 AM UTC** — 17 autonomous tasks including prospecting, enrichment, conversion, scoring, deal scanning, and self-optimization
+- **First-boot intelligence** — auto-seeds ICP profile, sequences, and templates; runs an immediate Apollo prospecting cycle if the database has zero contacts
+- **Concurrency guard** — prevents overlapping ticks from double-sending emails
+- **Redis distributed locks** — prevents duplicate autopilot runs across multiple worker instances
+- **Graceful shutdown** — handles SIGTERM/SIGINT for clean Railway deploys
+
+## Deployment on Railway
+
+Two services deployed from the same repository:
 
 ### Web Service
-```
-Build: npm run build (prisma generate + next build)
-Start: npm start (prisma db push + next start)
-Port:  $PORT (auto-assigned)
+```bash
+Build: npm run build    # prisma generate + next build
+Start: npm start        # prisma db push + next start on $PORT
 ```
 
 ### Worker Service
-```
+```bash
 Build: npm run build
 Start: npx prisma db push --accept-data-loss; npm run worker
-Port:  none (background process, no healthcheck)
+# No HTTP port — background process, no healthcheck needed
 ```
 
-### Required Environment Variables
+### Environment Variables
 
-| Variable | Source |
-|---|---|
-| `DATABASE_URL` | Railway PostgreSQL (internal network) |
-| `REDIS_URL` | Railway Redis/Valkey |
-| `NEXTAUTH_SECRET` | Random string for session encryption |
-| `NEXTAUTH_URL` | Public URL of the web service |
+| Variable | Source | Required |
+|---|---|---|
+| `DATABASE_URL` | Railway PostgreSQL (internal network) | Yes |
+| `REDIS_URL` | Railway Redis/Valkey | Yes |
+| `NEXTAUTH_SECRET` | Random string for session encryption | Yes |
+| `NEXTAUTH_URL` | Public URL of the web service | Yes |
 
-All integration API keys (Apollo, Instantly, Anthropic, etc.) are managed via the **Integrations** page in the app UI and stored in the database — not as environment variables.
+All integration API keys (Apollo, Instantly, Anthropic, Stripe, etc.) are configured through the **Integrations** page in the app UI and stored in the database — not as environment variables.
 
 ## Local Development
 
 ```bash
 # Prerequisites: Node 22.16.0, PostgreSQL, Redis
 
-# Install dependencies
-npm install
-
-# Set up environment
-cp .env.example .env  # Edit with your DATABASE_URL, REDIS_URL, etc.
-
-# Push schema to database
-npx prisma db push
-
-# Run web server
-npm run dev
-
-# Run worker (separate terminal)
-npm run worker
+npm install                 # Install dependencies
+cp .env.example .env        # Configure DATABASE_URL, REDIS_URL
+npx prisma db push          # Sync schema to database
+npm run dev                 # Start web server (http://localhost:3000)
+npm run worker              # Start worker (separate terminal)
 ```
 
-## Scale
+## Project Scale
 
-- 75 Prisma models
-- 120+ API routes
-- 70+ pages
-- 32 AI engine files
-- 77 UI components
+| Metric | Count |
+|---|---|
+| Prisma database models | 75 |
+| API routes | 120+ |
+| Pages | 70+ |
+| AI engine files | 32 |
+| UI components | 77 |
+| Integrations | 11 |
+
+## Frequently Asked Questions
+
+### What is AgencyCRM?
+AgencyCRM is an autonomous AI-powered CRM designed for B2B agency founders. It automates the entire sales pipeline from prospect discovery through Apollo.io, to cold email outreach via Instantly.ai, lead scoring and BANT qualification using Claude AI, proposal generation with PandaDocs, and invoicing through Stripe.
+
+### How does AgencyCRM compare to HubSpot?
+Unlike HubSpot, AgencyCRM is fully autonomous — it requires zero manual data entry or button clicking. HubSpot provides tools that humans operate; AgencyCRM provides AI agents that operate themselves. It also includes built-in cold email automation (Instantly.ai), AI voice agents (Vapi), and self-optimizing ICP scoring that HubSpot does not offer.
+
+### Does AgencyCRM support cold email automation?
+Yes. AgencyCRM uses Instantly.ai for all cold outreach with pre-warmed sending domains. When a prospect shows warm intent (replies, clicks, or books a meeting), the system automatically transitions them to branded Gmail API outreach. This cold-to-warm domain handoff is fully automated.
+
+### How does the AI lead scoring work?
+AgencyCRM uses a dual scoring system: fitScore (0-55, based on ICP match, persists indefinitely) and engagementScore (0-45, based on interactions, decays 25% per month). The combined leadScore determines lifecycle stage advancement. The AI self-calibrates scoring weights weekly based on closed deal outcomes.
+
+### Is AgencyCRM open source?
+Yes. AgencyCRM is open source and available on GitHub. It is built with Next.js 16, React 19, Prisma 7, PostgreSQL, Redis, and Anthropic Claude AI. It deploys on Railway with separate web and worker services.
+
+### How many contacts can AgencyCRM pull from Apollo?
+AgencyCRM pulls 100 contacts per prospecting cycle from Apollo.io. On first boot, it runs immediately. After that, it runs daily at 6 AM UTC, fetching the next page of results each day and cycling through all available prospects that match the ICP criteria.
+
+---
+
+Built with Next.js 16, React 19, Prisma 7, PostgreSQL, Redis, and Claude AI. Deployed on Railway.
