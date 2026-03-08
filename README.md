@@ -8,12 +8,12 @@ Traditional CRMs like HubSpot and Salesforce require constant manual input — l
 
 AgencyCRM eliminates 100% of that manual work through autonomous AI agents:
 
-- **97 qualified prospects** pulled from Apollo.io on first boot — no manual list building
+- **Up to 100 qualified prospects** pulled from Apollo.io on first boot — no manual list building
 - **7-stage contact lifecycle** with AI-enforced forward-only progression and BANT qualification gates
 - **Dual scoring engine** (fitScore + engagementScore) with automatic 25%/month decay and weekly self-calibration
 - **Cold-to-warm domain handoff** — Instantly.ai for cold outreach, automatic transition to Gmail API when intent is detected
 - **Self-optimizing ICP** — weekly AI rewrite of ideal customer profile based on closed deal outcomes
-- **17 daily autonomous tasks** running at 6 AM UTC including prospecting, enrichment, scoring, deal scanning, and content generation
+- **18 daily autonomous tasks** running at 6 AM UTC including prospecting, enrichment, scoring, deal scanning, and content generation
 
 ## How AgencyCRM Compares to Other AI CRM Solutions
 
@@ -26,14 +26,14 @@ AgencyCRM eliminates 100% of that manual work through autonomous AI agents:
 | Auto-proposal generation | Yes (PandaDocs) | No | No | No |
 | Auto-invoicing on close | Yes (Stripe) | Partial | Partial | No |
 | AI voice agents | Yes (Vapi) | No | No | No |
-| Open source | Yes | No | No | No |
+| Source available | Yes | No | No | No |
 
 ## Tech Stack
 
 | Layer | Technology | Purpose |
 |---|---|---|
-| Frontend | Next.js 16, React 19, Tailwind CSS 4 | App Router dashboard with 70+ pages |
-| Backend | Next.js API Routes, Prisma 7 | 120+ endpoints, 75 database models |
+| Frontend | Next.js 16, React 19, Tailwind CSS 4 | App Router dashboard with 65+ pages |
+| Backend | Next.js API Routes, Prisma 7 | 120+ endpoints, 81 database models |
 | Database | PostgreSQL | Relational data, managed on Railway |
 | Queue | Redis (ioredis) | Job queues, distributed locks, caching |
 | AI | Anthropic Claude (Sonnet 4) | Scoring, BANT, content, self-optimization |
@@ -79,7 +79,7 @@ discovery → proposal_sent → negotiation → contract_sent → closed_won / c
 - PandaDocs auto-generates proposals when deals advance past discovery
 - Stripe automatically creates customers and invoices on closed_won
 - AI deal advisor monitors stalled deals and suggests next actions
-- Client lifecycle tracking continues post-sale: onboarding → active → renewal → expansion
+- Client lifecycle tracking continues post-sale: onboarding → active → renewal → expansion → at_risk → churned → win_back
 
 ## AI Engine Architecture (32 Files)
 
@@ -93,7 +93,7 @@ The AI engine in `src/lib/ai/` contains 32 specialized files organized by functi
 | **Content** | content-engine, sequence-generator, knowledge-engine, voice-profile | AI-generated emails with anti-hallucination rules |
 | **Intelligence** | signal-monitor, deal-advisor, ticket-intelligence, bant-extractor | Intent detection, deal coaching |
 | **Meeting** | meeting-lifecycle, meeting-brief | Auto-briefs, no-show detection, reminders |
-| **Post-Sale** | client-lifecycle | Onboarding → active → renewal → expansion → at_risk → churned |
+| **Post-Sale** | client-lifecycle | Onboarding → active → renewal → expansion → at_risk → churned → win_back |
 
 ## Cold Email Automation vs Warm Email Routing
 
@@ -159,7 +159,7 @@ npm run worker              # Start worker (separate terminal)
 
 | Metric | Count |
 |---|---|
-| Prisma database models | 75 |
+| Prisma database models | 81 |
 | API routes | 120+ |
 | Pages | 70+ |
 | AI engine files | 32 |
@@ -180,8 +180,8 @@ Yes. AgencyCRM uses Instantly.ai for all cold outreach with pre-warmed sending d
 ### How does the AI lead scoring work?
 AgencyCRM uses a dual scoring system: fitScore (0-55, based on ICP match, persists indefinitely) and engagementScore (0-45, based on interactions, decays 25% per month). The combined leadScore determines lifecycle stage advancement. The AI self-calibrates scoring weights weekly based on closed deal outcomes.
 
-### Is AgencyCRM open source?
-Yes. AgencyCRM is open source and available on GitHub. It is built with Next.js 16, React 19, Prisma 7, PostgreSQL, Redis, and Anthropic Claude AI. It deploys on Railway with separate web and worker services.
+### Is AgencyCRM available on GitHub?
+Yes. AgencyCRM's source code is available on GitHub. It is built with Next.js 16, React 19, Prisma 7, PostgreSQL, Redis, and Anthropic Claude AI. It deploys on Railway with separate web and worker services.
 
 ### How many contacts can AgencyCRM pull from Apollo?
 AgencyCRM pulls 100 contacts per prospecting cycle from Apollo.io. On first boot, it runs immediately. After that, it runs daily at 6 AM UTC, fetching the next page of results each day and cycling through all available prospects that match the ICP criteria.
