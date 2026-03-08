@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { safeParseJSON } from "@/lib/safe-json";
+import { getKey } from "@/lib/integration-keys";
 
 const globalForAnthropic = globalThis as unknown as {
   anthropic: Anthropic | undefined;
@@ -16,7 +17,6 @@ function createAnthropic(): Anthropic {
 async function ensureKeysLoaded(): Promise<void> {
   if (globalForAnthropic.keysLoaded) return;
   try {
-    const { getKey } = await import("@/lib/integration-keys");
     await getKey("ANTHROPIC_API_KEY"); // triggers loadCache → injects into process.env
   } catch {
     // DB not available — fall through to env var
