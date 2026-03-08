@@ -168,17 +168,15 @@ export interface ApolloSearchParams {
 export const apollo = {
   /**
    * Search for people matching criteria.
-   * Endpoint: POST /mixed_people/search
-   * Response: { people: [...], pagination: { total_entries, total_pages, page, per_page } }
+   * Endpoint: POST /mixed_people/api_search (standard API key tier)
    */
   peopleSearch: (params: ApolloSearchParams) =>
     apolloFetchPost<{
       people: ApolloPersonResult[];
-      pagination: { total_entries: number; total_pages: number; page: number; per_page: number };
-      // Apollo sometimes returns flat total_entries instead of nested pagination
+      pagination?: { total_entries: number; total_pages: number; page: number; per_page: number };
       total_entries?: number;
     }>(
-      "/mixed_people/search",
+      "/mixed_people/api_search",
       {
         method: "POST",
         body: {

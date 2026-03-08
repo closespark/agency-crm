@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
       where: { id: prospectSearch.id },
       data: {
         status: "complete",
-        resultsCount: result.pagination.total_entries,
+        resultsCount: result.pagination?.total_entries ?? result.total_entries ?? 0,
       },
     });
 
@@ -98,9 +98,9 @@ export async function POST(request: NextRequest) {
         search: {
           id: prospectSearch.id,
           name: searchName,
-          totalResults: result.pagination.total_entries,
-          totalPages: result.pagination.total_pages,
-          currentPage: result.pagination.page,
+          totalResults: result.pagination?.total_entries ?? result.total_entries ?? 0,
+          totalPages: result.pagination?.total_pages ?? 1,
+          currentPage: result.pagination?.page ?? 1,
         },
         prospects,
       },
