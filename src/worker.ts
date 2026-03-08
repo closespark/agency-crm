@@ -291,7 +291,9 @@ async function maybeRenewGmailWatch() {
     lastGmailWatchAt = Date.now();
     console.log(`[worker] Gmail watch registered (expires: ${result.expiration})`);
   } catch (err) {
-    console.error("[worker] Gmail watch registration failed:", err);
+    // Set timestamp on failure so we don't spam every 30s tick — retry in 1 hour
+    lastGmailWatchAt = Date.now() - GMAIL_WATCH_INTERVAL_MS + 60 * 60 * 1000;
+    console.error("[worker] Gmail watch registration failed (will retry in 1h):", (err as Error).message);
   }
 }
 
