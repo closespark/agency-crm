@@ -350,7 +350,9 @@ export async function runProspectingCycle(): Promise<{
   let searched = 0;
 
   try {
+    console.log("[icp-engine] Apollo search params:", JSON.stringify(params));
     const result = await apolloClient.peopleSearch(params);
+    console.log("[icp-engine] Apollo raw response keys:", Object.keys(result || {}), "people count:", (result as Record<string, unknown>)?.people ? (result.people as unknown[]).length : "missing");
     const people = result.people || [];
     const pagination = result.pagination || { total_entries: 0, total_pages: 0, page: 1 };
     searched = people.length;
