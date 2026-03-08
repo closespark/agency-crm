@@ -2,13 +2,13 @@
 # This project uses multiple services — configure each in the Railway dashboard:
 #
 # Service: api (this repo, default)
-#   Build: npm run build
-#   Start: npm run db:migrate && npm start
-#   Port: 3000
+#   Build: npm run build (runs prisma generate + db push + next build)
+#   Start: npm start (runs node .next/standalone/server.js)
+#   Port: auto (reads $PORT)
 #
 # Service: worker (same repo, different start command)
 #   Build: npm install
-#   Start: npm run db:migrate && npm run worker
+#   Start: npm run worker
 #   No port (background process)
 #
 # Service: postgres (Railway managed)

@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "npx prisma generate && npx prisma db push --skip-generate && next build",
-    "start": "next start",
+    "start": "HOSTNAME=0.0.0.0 node .next/standalone/server.js",
     "lint": "eslint",
     "worker": "npx tsx src/worker.ts",
     "db:migrate": "npx prisma migrate deploy",
