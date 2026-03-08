@@ -104,111 +104,130 @@ export async function syncInstantlyCampaigns() {
 }
 
 /**
- * Create an Instantly campaign from a CRM Sequence, then add all enrolled contacts as leads.
+ * Ensure a fully configured, active Instantly campaign exists for the CRM to send through.
+ *
+ * Architecture: Instantly is the sending infrastructure. The CRM's processSequenceQueue()
+ * generates AI-personalized copy per contact per step, then adds the contact as a lead
+ * with custom_variables { subject, body }. The Instantly campaign has a single passthrough
+ * email template that renders {{subject}} and {{body}} — Instantly handles deliverability,
+ * account rotation, and sending schedule.
+ *
+ * On creation, this function:
+ * 1. Fetches all connected sending accounts from Instantly
+ * 2. Creates a campaign with those accounts assigned
+ * 3. Adds a passthrough email template that uses {{subject}} and {{body}} merge fields
+ * 4. Sets a business-hours sending schedule
+ * 5. Activates the campaign
+ *
+ * Returns the existing active campaign if one already exists.
  */
-export async function pushSequenceToInstantly(sequenceId: string) {
+export async function ensureInstantlyCampaign(campaignName?: string): Promise<{
+  campaignId: string;
+  instantlyId: string;
+  created: boolean;
+}> {
   if (!process.env.INSTANTLY_API_KEY) {
+    throw new Error("Instantly integration not configured. Set INSTANTLY_API_KEY.");
+  }
+
+  // Check if an active campaign already exists locally
+  const existing = await prisma.instantlyCampaign.findFirst({
+    where: { status: "active", instantlyId: { not: null } },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (existing?.instantlyId) {
+    return { campaignId: existing.id, instantlyId: existing.instantlyId, created: false };
+  }
+
+  // Step 1: Fetch connected sending accounts from Instantly
+  const accountsResult = await instantly.accounts.list();
+  const accounts = accountsResult.items;
+
+  if (accounts.length === 0) {
     throw new Error(
-      "Instantly integration not configured. Set INSTANTLY_API_KEY."
+      "No sending accounts found in Instantly. " +
+      "Connect and warm at least one email account in your Instantly dashboard before the CRM can send."
     );
   }
 
-  const sequence = await prisma.sequence.findUnique({
-    where: { id: sequenceId },
-    include: {
-      enrollments: {
-        where: { status: "active", channel: { in: ["email", "multi"] } },
-        include: { contact: true },
-      },
-    },
-  });
+  const sendingEmails = accounts.map((a) => a.email);
 
-  if (!sequence) {
-    throw new Error(`Sequence not found: ${sequenceId}`);
+  // Log the actual accounts discovered — sender names, emails, warmup status
+  for (const acct of accounts) {
+    const senderName = [acct.first_name, acct.last_name].filter(Boolean).join(" ") || "(no name)";
+    console.log(`[sync] Instantly account: ${senderName} <${acct.email}> (warmup: ${acct.warmup_status}, daily limit: ${acct.daily_limit})`);
   }
 
-  // Parse sequence steps
-  let steps: { subject?: string; body?: string; delay_days?: number }[] = [];
-  try {
-    steps = JSON.parse(sequence.steps);
-  } catch {
-    throw new Error("Failed to parse sequence steps");
-  }
+  // Step 2: Create campaign with full configuration
+  const name = campaignName || `[CRM] Cold Outreach — ${new Date().toISOString().split("T")[0]}`;
 
-  // Filter to email steps only
-  const emailSteps = steps.filter(
-    (s: Record<string, unknown>) =>
-      !s.type || s.type === "email"
-  );
-
-  if (emailSteps.length === 0) {
-    throw new Error("Sequence has no email steps to push to Instantly");
-  }
-
-  // Create campaign in Instantly
   const apiResult = await instantly.campaigns.create({
-    name: `[CRM] ${sequence.name}`,
+    name,
+
+    // Assign all connected sending accounts — Instantly rotates between them
+    // Each account uses the sender name + signature configured in Instantly's dashboard
+    email_list: sendingEmails,
+
+    // Single passthrough template — the CRM passes AI-generated subject/body per lead
+    // via custom_variables. Instantly renders these merge fields and sends.
+    sequences: [{
+      steps: [{
+        type: "email",
+        delay: 0,
+        variants: [{
+          subject: "{{subject}}",
+          body: "{{body}}",
+        }],
+      }],
+    }],
+
+    // Business hours schedule (M-F, 9am-5pm, US Eastern)
+    campaign_schedule: {
+      schedules: [{
+        name: "Business Hours",
+        timezone: "America/New_York",
+        timing: { from: "09:00", to: "17:00" },
+        days: {
+          "0": false, // Sunday
+          "1": true,
+          "2": true,
+          "3": true,
+          "4": true,
+          "5": true,
+          "6": false, // Saturday
+        },
+      }],
+    },
+
+    // Send settings
+    stop_on_reply: true,
+    stop_on_auto_reply: true,
+    open_tracking: true,
+    link_tracking: true,
+    daily_limit: 40, // Conservative limit per account
   });
 
-  // Create local record
+  // Step 3: Activate the campaign
+  try {
+    await instantly.campaigns.activate(apiResult.id);
+  } catch (err) {
+    console.warn(`[sync] Failed to activate Instantly campaign ${apiResult.id}:`, err);
+  }
+
+  // Step 4: Create local record
   const campaign = await prisma.instantlyCampaign.create({
     data: {
       instantlyId: apiResult.id,
-      name: `[CRM] ${sequence.name}`,
-      status: "draft",
-      sequences: JSON.stringify(emailSteps),
+      name,
+      status: "active",
+      sequences: JSON.stringify([{ template: "passthrough", fields: ["subject", "body"] }]),
       syncedAt: new Date(),
     },
   });
 
-  // Add enrolled contacts as leads
-  const leads = sequence.enrollments
-    .filter((e) => e.contact.email)
-    .map((e) => ({
-      email: e.contact.email!,
-      first_name: e.contact.firstName,
-      last_name: e.contact.lastName,
-      custom_variables: {
-        crm_contact_id: e.contact.id,
-        crm_enrollment_id: e.id,
-      },
-    }));
-
-  if (leads.length > 0) {
-    await instantly.leads.add(apiResult.id, leads);
-
-    // Update local campaign with lead summary
-    await prisma.instantlyCampaign.update({
-      where: { id: campaign.id },
-      data: {
-        leads: JSON.stringify({
-          count: leads.length,
-          addedAt: new Date().toISOString(),
-        }),
-      },
-    });
-
-    // Update enrollments with campaign reference
-    for (const enrollment of sequence.enrollments) {
-      await prisma.sequenceEnrollment.update({
-        where: { id: enrollment.id },
-        data: {
-          metadata: JSON.stringify({
-            ...(enrollment.metadata ? JSON.parse(enrollment.metadata) : {}),
-            instantlyCampaignId: campaign.id,
-            instantlyApiId: apiResult.id,
-            pushedAt: new Date().toISOString(),
-          }),
-        },
-      });
-    }
-  }
-
-  return {
-    campaign,
-    leadsAdded: leads.length,
-    instantlyId: apiResult.id,
-  };
+  console.log(`[sync] Created Instantly campaign: ${name} (${apiResult.id}) with ${sendingEmails.length} sending accounts`);
+  return { campaignId: campaign.id, instantlyId: apiResult.id, created: true };
 }
 
 /**

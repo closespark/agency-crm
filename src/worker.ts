@@ -210,38 +210,19 @@ async function processSequences() {
     console.error("[worker] sequence processing error:", err);
   }
 
-  // Auto-push active sequences with cold-domain contacts to Instantly
+  // Ensure an active Instantly campaign container exists for cold sends.
+  // Leads are NOT bulk-pushed — processSequenceQueue() adds them one at a time
+  // with AI-generated content at send time.
   try {
-    if (!process.env.INSTANTLY_API_KEY) return;
-
-    // Find active sequences that have cold-domain enrollments not yet pushed
-    const candidates = await prisma.sequence.findMany({
-      where: {
-        isActive: true,
-        enrollments: {
-          some: {
-            status: "active",
-            contact: { domainTier: "cold" },
-            metadata: { not: { contains: "instantlyCampaignId" } },
-          },
-        },
-      },
-      select: { id: true, name: true },
-    });
-
-    if (candidates.length > 0) {
-      const { pushSequenceToInstantly } = await import("./lib/integrations/sync");
-      for (const seq of candidates) {
-        try {
-          const result = await pushSequenceToInstantly(seq.id);
-          console.log(`[worker] auto-pushed sequence "${seq.name}" to Instantly: ${result.leadsAdded} leads, campaign ${result.instantlyId}`);
-        } catch (err) {
-          console.error(`[worker] auto-push to Instantly failed for sequence ${seq.id}:`, err);
-        }
+    if (process.env.INSTANTLY_API_KEY) {
+      const { ensureInstantlyCampaign } = await import("./lib/integrations/sync");
+      const result = await ensureInstantlyCampaign();
+      if (result.created) {
+        console.log(`[worker] Created Instantly campaign container: ${result.instantlyId}`);
       }
     }
   } catch (err) {
-    console.error("[worker] Instantly auto-push error:", err);
+    console.error("[worker] Instantly campaign check error:", err);
   }
 }
 
@@ -496,7 +477,7 @@ async function maybeDailyAutopilot() {
             const enrollmentId = await enrollContactInSequence({
               sequenceId: activeSequence.id,
               contactId: contact.id,
-              channel: contact.domainTier === "warm" ? "email" : "multi",
+              channel: "email",
               nextActionAt: new Date(Date.now() + firstStepDelay * 24 * 60 * 60 * 1000),
             });
             if (enrollmentId) enrolled++;
@@ -679,6 +660,23 @@ async function start() {
       } catch (err) {
         console.error("[worker] first-boot auto-convert failed:", err);
       }
+
+      // Step 3: Create Instantly campaign container BEFORE first tick
+      // processSequenceQueue() adds leads one at a time with AI-generated content —
+      // it just needs an active campaign to exist as the sending container.
+      try {
+        if (process.env.INSTANTLY_API_KEY) {
+          const { ensureInstantlyCampaign } = await import("./lib/integrations/sync");
+          const result = await ensureInstantlyCampaign();
+          if (result.created) {
+            console.log(`[worker] first-boot: created Instantly campaign container (${result.instantlyId})`);
+          } else {
+            console.log(`[worker] first-boot: Instantly campaign already exists (${result.instantlyId})`);
+          }
+        }
+      } catch (err) {
+        console.error("[worker] first-boot Instantly campaign creation failed:", err);
+      }
     }
   } catch (err) {
     console.error("[worker] first-boot prospecting check failed:", err);
@@ -728,6 +726,43 @@ async function start() {
     }
   } catch (err) {
     console.error("[worker] enrollment repair failed:", err);
+  }
+
+  // One-time repair: reset deferred enrollments so they fire now that a campaign exists
+  // (contacts stuck with 1-hour backoff from before the campaign was created)
+  try {
+    const repairKey2 = "enrollment_backoff_repair_2026_03_08";
+    const alreadyRepaired2 = await prisma.systemChangelog.findFirst({
+      where: { category: "repair", changeType: repairKey2 },
+    });
+    if (!alreadyRepaired2) {
+      // Check if we now have an active campaign
+      const hasCampaign = await prisma.instantlyCampaign.findFirst({
+        where: { status: "active", instantlyId: { not: null } },
+      });
+      if (hasCampaign) {
+        // Reset any active enrollments with future nextActionAt back to now
+        const resetResult = await prisma.sequenceEnrollment.updateMany({
+          where: {
+            status: "active",
+            nextActionAt: { gt: new Date() },
+          },
+          data: { nextActionAt: new Date() },
+        });
+        await prisma.systemChangelog.create({
+          data: {
+            category: "repair",
+            changeType: repairKey2,
+            description: `Reset ${resetResult.count} deferred enrollments to fire immediately (campaign now exists)`,
+          },
+        });
+        if (resetResult.count > 0) {
+          console.log(`[worker] Reset ${resetResult.count} deferred enrollments — campaign now available`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[worker] enrollment backoff repair failed:", err);
   }
 
   // Main loop

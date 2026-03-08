@@ -96,11 +96,46 @@ export const instantly = {
     /** Get a single campaign — GET /campaigns/{id} */
     get: (id: string) => instantlyFetch<unknown>(`/campaigns/${id}`),
 
-    /** Create a campaign — POST /campaigns */
+    /**
+     * Create a campaign — POST /campaigns
+     *
+     * Required: name, campaign_schedule
+     * Key optional fields: email_list (sending accounts), sequences (email steps)
+     */
     create: (data: {
       name: string;
-      campaign_schedule?: unknown;
+      campaign_schedule?: {
+        schedules: {
+          name: string;
+          timezone: string;
+          timing: { from: string; to: string };
+          days: Record<string, boolean>; // "0"=Sun .. "6"=Sat
+        }[];
+        start_date?: string; // YYYY-MM-DD
+        end_date?: string;
+      };
+      email_list?: string[]; // Sending account emails to assign
+      sequences?: {
+        steps: {
+          type: "email";
+          delay: number; // Days after previous step
+          variants: {
+            subject: string;
+            body: string; // HTML
+          }[];
+        }[];
+      }[];
+      daily_limit?: number; // Emails per day per account
+      stop_on_reply?: boolean;
+      stop_on_auto_reply?: boolean;
+      open_tracking?: boolean;
+      link_tracking?: boolean;
+      text_only?: boolean;
     }) => instantlyFetch<{ id: string }>("/campaigns", { method: "POST", body: data }),
+
+    /** Update a campaign — PATCH /campaigns/{id} */
+    update: (id: string, data: Record<string, unknown>) =>
+      instantlyFetch<unknown>(`/campaigns/${id}`, { method: "PATCH", body: data }),
 
     /**
      * Activate (launch) a campaign — POST /campaigns/{id}/activate
@@ -180,10 +215,21 @@ export const instantly = {
   accounts: {
     /** List email sending accounts — GET /accounts */
     list: () =>
-      instantlyFetch<{ items: { id: string; email: string }[]; next_starting_after?: string }>(
-        "/accounts",
-        { params: { limit: "100" } }
-      ),
+      instantlyFetch<{
+        items: {
+          email: string;
+          first_name: string;
+          last_name: string;
+          signature: string;
+          status: number;
+          warmup_status: string;
+          daily_limit: number;
+          timestamp_created: string;
+          timestamp_last_used: string;
+          tracking_domain_name?: string;
+        }[];
+        next_starting_after?: string;
+      }>("/accounts", { params: { limit: "100" } }),
   },
 
   // ---------------------------------------------------------------------------

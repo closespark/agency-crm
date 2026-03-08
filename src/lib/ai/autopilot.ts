@@ -86,14 +86,44 @@ export async function processSequenceQueue(): Promise<number> {
         continue;
       }
 
-      // Gather full contact intelligence for AI copy generation
+      // Determine sending route based on contact's domain tier BEFORE generating AI copy
+      // This prevents burning Claude API credits when no delivery route exists
+      const enrolledContact = await prisma.contact.findUnique({
+        where: { id: enrollment.contactId },
+        select: { email: true, firstName: true, lastName: true, domainTier: true, globalOptOut: true },
+      });
+
+      // Respect global opt-out (CAN-SPAM/GDPR compliance)
+      if (enrolledContact?.globalOptOut) {
+        await prisma.sequenceEnrollment.update({
+          where: { id: enrollment.id },
+          data: { status: "unsubscribed" },
+        });
+        continue;
+      }
+
+      // Pre-flight: for cold email steps, verify an active Instantly campaign exists
+      // BEFORE generating AI copy (prevents burning Claude API credits on doomed sends)
+      if (currentStep.channel === "email" && enrolledContact?.domainTier !== "warm") {
+        const activeCampaign = await prisma.instantlyCampaign.findFirst({
+          where: { status: "active", instantlyId: { not: null } },
+        });
+        if (!activeCampaign) {
+          console.warn(`[autopilot] No active Instantly campaign — deferring cold email for ${enrollment.contactId} (1 hour backoff)`);
+          await prisma.sequenceEnrollment.update({
+            where: { id: enrollment.id },
+            data: { nextActionAt: new Date(Date.now() + 60 * 60 * 1000) },
+          });
+          continue; // Skip AI copy generation entirely
+        }
+      }
+
+      // NOW generate AI copy — we know a delivery route exists
       const { gatherContactIntelligence, generateStepCopy } = await import("./sequence-generator");
       const intel = await gatherContactIntelligence(enrollment.contactId, enrollment.sequenceId);
 
       let personalized: { subject?: string; body: string };
 
-      // New-style steps have angle/goal — generate copy from scratch using full intelligence
-      // Old-style steps have pre-written body — fall back to basic personalization
       if (currentStep.angle) {
         const copy = await generateStepCopy({
           step: currentStep as import("./sequence-generator").SequenceStep,
@@ -105,7 +135,6 @@ export async function processSequenceQueue(): Promise<number> {
         });
         personalized = copy;
       } else {
-        // Legacy fallback for old sequences with pre-written body text
         const personalizedResult = await runAIJob(
           "email_composer",
           "personalize_step",
@@ -119,7 +148,6 @@ export async function processSequenceQueue(): Promise<number> {
               companyName: enrollment.contact.company?.name,
               industry: enrollment.contact.company?.industry,
             },
-            // Even for legacy sequences, feed in available intelligence
             discoveryNotes: intel.conversations
               .filter((c) => c.direction === "inbound")
               .map((c) => c.summary || c.content)
@@ -130,21 +158,6 @@ export async function processSequenceQueue(): Promise<number> {
           { contactId: enrollment.contactId }
         );
         personalized = personalizedResult.output as { subject?: string; body: string };
-      }
-
-      // Determine sending route based on contact's domain tier
-      const enrolledContact = await prisma.contact.findUnique({
-        where: { id: enrollment.contactId },
-        select: { email: true, firstName: true, lastName: true, domainTier: true, globalOptOut: true },
-      });
-
-      // Respect global opt-out (CAN-SPAM/GDPR compliance)
-      if (enrolledContact?.globalOptOut) {
-        await prisma.sequenceEnrollment.update({
-          where: { id: enrollment.id },
-          data: { status: "unsubscribed" },
-        });
-        continue;
       }
 
       let gmailMeta: { gmailMessageId?: string; gmailThreadId?: string } = {};
@@ -287,11 +300,11 @@ export async function processSequenceQueue(): Promise<number> {
           },
         });
       } else {
-        // Step was skipped — retry on next tick (push nextActionAt forward by 5 minutes)
+        // Step was skipped — retry in 30 minutes (not 5 min, to avoid tight retry loops)
         await prisma.sequenceEnrollment.update({
           where: { id: enrollment.id },
           data: {
-            nextActionAt: new Date(Date.now() + 5 * 60 * 1000),
+            nextActionAt: new Date(Date.now() + 30 * 60 * 1000),
           },
         });
       }

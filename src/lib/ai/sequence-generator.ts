@@ -444,7 +444,7 @@ ${missionBlock}
 5. Reference SPECIFIC details you know: their company, their pain points, their quotes, their industry. If you have verbatim quotes from the contact, weave one in naturally. Only reference what is provided above — do not assume or fabricate context.
 6. If previous steps were sent, do NOT repeat those angles or phrasings. Each step must feel like a new thought.
 7. End with a SINGLE soft CTA that requires a one-sentence reply. Not "book a call" or "schedule a meeting" — something like "Does that match what you're seeing?" or "Worth exploring, or off base?"
-8. Sign off with a first name only (use "${process.env.BRANDED_FROM_NAME || "the sender"}"). No title, no company tagline, no "Best regards".
+8. Do NOT include any sign-off, signature, or closing name. No "Best,", no "Cheers,", no sender name. The email sending system appends the real sender's name and signature automatically. End the email on the CTA line.
 9. Plain text only. No HTML, no bullet points, no bold. Write like a human typing a quick email.
 10. Do NOT start with "Hi ${intel.firstName}," — vary the opener. Sometimes use just the name, sometimes jump straight into the point.
 

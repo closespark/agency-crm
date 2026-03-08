@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
           where: {
             contactId: contact.id,
             status: "active",
-            channel: "email",
+            channel: { in: ["email", "multi"] },
           },
           orderBy: { createdAt: "desc" },
         })

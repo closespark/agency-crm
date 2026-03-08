@@ -525,10 +525,12 @@ export async function advanceDealStage(
             metadata: { dealId, dealName: deal.name },
           });
           // Create first invoice from deal amount
-          if (deal.actualAmount || deal.amount) {
+          // Deal amounts are stored in dollars; Stripe expects cents
+          const dealAmountDollars = deal.actualAmount || deal.amount || 0;
+          if (dealAmountDollars > 0) {
             await createInvoice({
               stripeCustomerId: customer.stripeCustomerId,
-              amount: deal.actualAmount || deal.amount || 0,
+              amount: Math.round(dealAmountDollars * 100),
               description: `${deal.name} — ${deal.paymentTerms || "Initial invoice"}`,
               dealId,
             });

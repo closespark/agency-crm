@@ -193,7 +193,7 @@ export async function convertProspectToContact(prospectId: string): Promise<stri
       phone: prospect.phone,
       jobTitle: prospect.jobTitle,
       companyId,
-      source: "instantly",
+      source: "apollo",
       lifecycleStage: "lead",
       leadStatus: "new",
       fitScore: prospect.fitScore || 0,
@@ -248,7 +248,7 @@ export async function convertProspectToContact(prospectId: string): Promise<stri
     const enrollmentId = await enrollContactInSequence({
       sequenceId: activeSequence.id,
       contactId: contact.id,
-      channel: contact.domainTier === "warm" ? "email" : "multi",
+      channel: "email",
       nextActionAt,
       metadata: { source: "prospect_conversion", prospectId },
     });
@@ -257,33 +257,9 @@ export async function convertProspectToContact(prospectId: string): Promise<stri
       console.log(`[prospector] Auto-enrolled contact ${contact.id} in sequence "${activeSequence.name}"`);
     }
 
-    // Push cold-domain contacts to Instantly for email warming
-    const contactEmail = contact.email;
-    if (contact.domainTier !== "warm" && contactEmail) {
-      try {
-        const activeCampaign = await prisma.instantlyCampaign.findFirst({
-          where: { status: "active", instantlyId: { not: null } },
-          orderBy: { createdAt: "desc" },
-        });
-
-        if (activeCampaign?.instantlyId) {
-          const { instantly } = await import("@/lib/integrations/instantly");
-          await instantly.leads.add(activeCampaign.instantlyId, [
-            {
-              email: contactEmail,
-              first_name: contact.firstName,
-              last_name: contact.lastName || undefined,
-              custom_variables: {
-                crm_contact_id: contact.id,
-              },
-            },
-          ]);
-          console.log(`[prospector] Pushed cold contact ${contact.id} to Instantly campaign ${activeCampaign.name}`);
-        }
-      } catch (instantlyErr) {
-        console.error(`[prospector] Instantly push failed for ${contact.id}:`, instantlyErr);
-      }
-    }
+    // NOTE: Cold contacts are NOT pushed to Instantly here. The CRM's processSequenceQueue()
+    // adds leads one at a time with AI-generated subject/body at send time. Pushing here
+    // without content would create empty leads that Instantly can't send.
   } catch (err) {
     console.error(`[prospector] Auto-enroll in sequence failed for ${contact.id}:`, err);
   }
