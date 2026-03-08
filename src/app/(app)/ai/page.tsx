@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageLoader } from "@/components/ui/loading";
-import { formatDateTime, formatCurrency, parseJSON } from "@/lib/utils";
+import { formatDateTime, formatCurrency } from "@/lib/utils";
 import {
   Brain,
   Send,

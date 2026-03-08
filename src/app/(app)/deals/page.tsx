@@ -81,13 +81,18 @@ export default function DealsPage() {
       },
     });
 
-    const res = await fetch(`/api/deals${qs}`);
-    const json = await res.json();
-    if (json.data) {
-      setDeals(json.data);
-      setTotalPages(json.meta?.totalPages || 1);
+    try {
+      const res = await fetch(`/api/deals${qs}`);
+      const json = await res.json();
+      if (json.data) {
+        setDeals(json.data);
+        setTotalPages(json.meta?.totalPages || 1);
+      }
+    } catch (err) {
+      console.error("Failed to fetch deals:", err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [page, pageSize, debouncedSearch, stage]);
 
   useEffect(() => {
@@ -115,7 +120,7 @@ export default function DealsPage() {
       label: "Stage",
       render: (deal) => (
         <Badge variant={getStageBadgeVariant(deal.stage)}>
-          {deal.stage.replace("_", " ")}
+          {deal.stage.replace(/_/g, " ")}
         </Badge>
       ),
     },

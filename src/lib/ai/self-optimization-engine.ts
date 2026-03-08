@@ -600,6 +600,13 @@ Return JSON: {
 
   // Apply weight adjustments
   for (const adj of calibration.adjustments) {
+    // Verify the rule exists before attempting update — AI may hallucinate ruleIds
+    const existingRule = await prisma.leadScoreRule.findUnique({ where: { id: adj.ruleId } });
+    if (!existingRule) {
+      console.warn(`[self-optimization] Skipping adjustment for non-existent rule ${adj.ruleId}`);
+      continue;
+    }
+
     await prisma.leadScoreRule.update({
       where: { id: adj.ruleId },
       data: { points: adj.newPoints },

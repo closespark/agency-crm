@@ -213,9 +213,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("PandaDocs webhook error:", error);
     return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Internal server error",
-      },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }

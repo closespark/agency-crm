@@ -106,7 +106,7 @@ model AuditLog {
   details    String?  // JSON string of changes
   createdAt  DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id])
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([resource, resourceId])
@@ -447,7 +447,7 @@ model Activity {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  user    User     @relation(fields: [userId], references: [id])
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
   deal    Deal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
 
@@ -465,12 +465,12 @@ model Task {
   priority    String    @default("medium") // low, medium, high, urgent
   status      String    @default("pending") // pending, in_progress, completed
   dueDate     DateTime?
-  userId      String
+  userId      String?
   contactId   String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  user    User     @relation(fields: [userId], references: [id])
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
 
   @@index([userId])
@@ -508,8 +508,8 @@ model Ticket {
   updatedAt   DateTime @updatedAt
 
   contact  Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  company  Company?  @relation(fields: [companyId], references: [id])
-  assignee User?     @relation("TicketAssignee", fields: [assigneeId], references: [id])
+  company  Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  assignee User?     @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   comments Comment[]
 
   @@index([contactId])
@@ -529,7 +529,7 @@ model Comment {
   createdAt DateTime @default(now())
 
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id])
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([ticketId])
 }
@@ -714,7 +714,7 @@ model Meeting {
 model MeetingTranscript {
   id          String   @id @default(cuid())
   meetingId   String   @unique
-  meeting     Meeting  @relation(fields: [meetingId], references: [id])
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   source      String   @default("tldv") // tldv, manual, vapi
   rawTranscript String // full transcript text
   summary     String?  // AI-generated summary
@@ -761,7 +761,7 @@ model Conversation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  assignee User?    @relation("ConversationAssignee", fields: [assigneeId], references: [id])
+  assignee User?    @relation("ConversationAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   contact  Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
   messages Message[]
 
@@ -797,7 +797,7 @@ model Notification {
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id])
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([isRead])
@@ -875,7 +875,7 @@ model WebhookEvent {
   error         String?
   createdAt     DateTime @default(now())
 
-  integration Integration @relation(fields: [integrationId], references: [id])
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
 
   @@index([integrationId])
 }
@@ -915,7 +915,7 @@ model AIJob {
   completedAt DateTime?
   createdAt   DateTime  @default(now())
 
-  agent   AIAgent  @relation(fields: [agentId], references: [id])
+  agent   AIAgent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
 
   @@index([agentId])
   @@index([status])
@@ -987,11 +987,12 @@ model SequenceEnrollment {
   @@index([nextActionAt])
   @@index([contactId, status, channel])
   @@index([contactId, sequenceId, status], name: "idx_contact_sequence_status")
+  @@unique([sequenceId, contactId])
 }
 
 model InstantlyCampaign {
   id              String   @id @default(cuid())
-  instantlyId     String?
+  instantlyId     String?   @unique
   name            String
   status          String   @default("draft") // draft, active, paused, completed
   sendingAccountId String?
@@ -1384,7 +1385,7 @@ model StripeSubscription {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
-  customer StripeCustomer @relation(fields: [stripeCustomerId], references: [stripeCustomerId])
+  customer StripeCustomer @relation(fields: [stripeCustomerId], references: [stripeCustomerId], onDelete: Cascade)
 }
 
 model StripeInvoice {
@@ -1404,7 +1405,7 @@ model StripeInvoice {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  customer StripeCustomer @relation(fields: [stripeCustomerId], references: [stripeCustomerId])
+  customer StripeCustomer @relation(fields: [stripeCustomerId], references: [stripeCustomerId], onDelete: Cascade)
 }
 
 // ============================================

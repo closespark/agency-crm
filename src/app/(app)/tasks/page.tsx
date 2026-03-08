@@ -94,13 +94,18 @@ export default function TasksPage() {
       },
     });
 
-    const res = await fetch(`/api/tasks${qs}`);
-    const json = await res.json();
-    if (json.data) {
-      setTasks(json.data);
-      setTotalPages(json.meta?.totalPages || 1);
+    try {
+      const res = await fetch(`/api/tasks${qs}`);
+      const json = await res.json();
+      if (json.data) {
+        setTasks(json.data);
+        setTotalPages(json.meta?.totalPages || 1);
+      }
+    } catch (err) {
+      console.error("Failed to fetch tasks:", err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [page, pageSize, debouncedSearch, status, priority]);
 
   useEffect(() => {
@@ -178,7 +183,7 @@ export default function TasksPage() {
       key: "type",
       label: "Type",
       render: (task) => (
-        <Badge variant="secondary">{task.type.replace("_", " ")}</Badge>
+        <Badge variant="secondary">{task.type.replace(/_/g, " ")}</Badge>
       ),
     },
     {
@@ -201,7 +206,7 @@ export default function TasksPage() {
               ? ("warning" as const)
               : ("secondary" as const);
         return (
-          <Badge variant={variant}>{task.status.replace("_", " ")}</Badge>
+          <Badge variant={variant}>{task.status.replace(/_/g, " ")}</Badge>
         );
       },
     },

@@ -226,10 +226,7 @@ export async function POST(request: NextRequest) {
     console.error("Alfred webhook error:", error);
     await markProcessed(null, error instanceof Error ? error.message : "Unknown error").catch(() => {});
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Internal server error",
-      },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }

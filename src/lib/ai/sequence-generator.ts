@@ -457,7 +457,17 @@ Return JSON: { "subject": "...", "body": "..." }`;
     { contactId: undefined }
   );
 
-  return result.output as { subject: string; body: string };
+  const output = result.output as { subject: string; body: string };
+
+  // Validate AI output — never send empty emails
+  if (!output?.subject || typeof output.subject !== "string" || output.subject.trim() === "") {
+    throw new Error(`generateStepCopy returned empty or missing subject for step ${step.stepNumber} of "${sequenceName}"`);
+  }
+  if (!output?.body || typeof output.body !== "string" || output.body.trim() === "") {
+    throw new Error(`generateStepCopy returned empty or missing body for step ${step.stepNumber} of "${sequenceName}"`);
+  }
+
+  return output;
 }
 
 // ============================================

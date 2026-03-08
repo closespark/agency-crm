@@ -88,8 +88,7 @@ export default function ListDetailPage() {
 
   const handleRemoveMember = async (contactId: string) => {
     if (!confirm("Remove this contact from the list?")) return;
-    await api.delete(`/lists/${id}/members`);
-    // Note: The DELETE endpoint expects contactId in body
+    // The DELETE endpoint expects contactId in body
     await fetch(`/api/lists/${id}/members`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },

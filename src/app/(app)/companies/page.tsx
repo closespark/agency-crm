@@ -72,13 +72,18 @@ export default function CompaniesPage() {
       },
     });
 
-    const res = await fetch(`/api/companies${qs}`);
-    const json = await res.json();
-    if (json.data) {
-      setCompanies(json.data);
-      setTotalPages(json.meta?.totalPages || 1);
+    try {
+      const res = await fetch(`/api/companies${qs}`);
+      const json = await res.json();
+      if (json.data) {
+        setCompanies(json.data);
+        setTotalPages(json.meta?.totalPages || 1);
+      }
+    } catch (err) {
+      console.error("Failed to fetch companies:", err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [page, pageSize, debouncedSearch, industry, size]);
 
   useEffect(() => {

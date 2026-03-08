@@ -15,7 +15,7 @@ import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { SequenceTimeline } from "@/components/sequences/sequence-timeline";
 import { EnrollmentTable } from "@/components/sequences/enrollment-table";
 import { api } from "@/lib/api";
-import { formatDate, parseJSON } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 
 interface SequenceStep {
   stepNumber: number;

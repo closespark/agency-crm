@@ -38,12 +38,12 @@ export async function incrementContactScore(
     if (!contact) return;
 
     const data: Record<string, unknown> = {
-      engagementScore: Math.min(100, contact.engagementScore + delta),
+      engagementScore: Math.max(0, Math.min(100, contact.engagementScore + delta)),
       scoreDirty: true,
     };
 
     if (!opts?.engagementOnly) {
-      data.leadScore = Math.min(100, contact.leadScore + delta);
+      data.leadScore = Math.max(0, Math.min(100, contact.leadScore + delta));
     }
 
     await prisma.contact.update({ where: { id: contactId }, data });

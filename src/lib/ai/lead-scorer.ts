@@ -128,19 +128,28 @@ Return: { totalScore, fitScore, engagementScore, breakdown: { demographic, firmo
   const result = await runAIJob("lead_scorer", "score_lead", input, { contactId });
   const scoreData = result.output as ScoreResult;
 
+  // Clamp AI-returned scores to valid ranges before writing to DB
+  const fitScore = Math.max(0, Math.min(55, scoreData.fitScore || 0));
+  const engagementScore = Math.max(0, Math.min(45, scoreData.engagementScore || 0));
+  const leadScore = Math.max(0, Math.min(100, fitScore + engagementScore));
+
   // Update contact with dual scores — do NOT directly set lifecycle stage
   // (lifecycle transitions are handled by lifecycle-engine.ts with forward-only enforcement)
   await prisma.contact.update({
     where: { id: contactId },
     data: {
-      leadScore: scoreData.totalScore,
-      fitScore: scoreData.fitScore,
-      engagementScore: scoreData.engagementScore,
+      leadScore,
+      fitScore,
+      engagementScore,
       leadStatus: scoreData.leadStatus,
       scoreDirty: false,
       lastScoreEvaluated: new Date(),
     },
   });
+
+  scoreData.fitScore = fitScore;
+  scoreData.engagementScore = engagementScore;
+  scoreData.totalScore = leadScore;
 
   return scoreData;
 }

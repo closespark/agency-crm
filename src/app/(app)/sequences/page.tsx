@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageLoader } from "@/components/ui/loading";
 import { api, buildQueryString } from "@/lib/api";
-import { formatDate, parseJSON } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 
 interface SequenceItem {
   id: string;

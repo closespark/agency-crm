@@ -50,6 +50,7 @@ export async function triggerDomainHandoff(params: {
     data: { handoffInProgress: true },
   });
 
+  try {
   // Find the active Instantly campaign for this contact
   const instantlyCampaign = await findInstantlyCampaign(contact.email);
 
@@ -162,6 +163,10 @@ export async function triggerDomainHandoff(params: {
   });
 
   return handoff.id;
+  } catch (err) {
+    await prisma.contact.update({ where: { id: contactId }, data: { handoffInProgress: false } });
+    throw err;
+  }
 }
 
 // Find Instantly campaign that has this contact's email

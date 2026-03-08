@@ -668,10 +668,16 @@ export async function advanceClientStage(
 
 async function syncCompanyLifecycle(companyId: string): Promise<void> {
   // Company lifecycle = highest stage among its contacts
-  const contacts = await prisma.contact.findMany({
-    where: { companyId },
-    select: { lifecycleStage: true },
-  });
+  const [contacts, company] = await Promise.all([
+    prisma.contact.findMany({
+      where: { companyId },
+      select: { lifecycleStage: true },
+    }),
+    prisma.company.findUnique({
+      where: { id: companyId },
+      select: { lifecycleStage: true },
+    }),
+  ]);
 
   if (contacts.length === 0) return;
 
@@ -682,11 +688,17 @@ async function syncCompanyLifecycle(companyId: string): Promise<void> {
   }
 
   if (highestIdx >= 0) {
-    const highestStage = CONTACT_STAGES[highestIdx];
-    await prisma.company.update({
-      where: { id: companyId },
-      data: { lifecycleStage: highestStage },
-    });
+    // Only advance, never regress — check current company stage index
+    const currentCompanyIdx = company?.lifecycleStage
+      ? getStageIndex(company.lifecycleStage, CONTACT_STAGES)
+      : -1;
+    if (highestIdx >= currentCompanyIdx) {
+      const highestStage = CONTACT_STAGES[highestIdx];
+      await prisma.company.update({
+        where: { id: companyId },
+        data: { lifecycleStage: highestStage },
+      });
+    }
   }
 }
 
@@ -779,27 +791,36 @@ export async function processAutoAdvanceRules(): Promise<number> {
 
     const stageIdx = getStageIndex(contact.lifecycleStage, CONTACT_STAGES);
     const sqlIdx = getStageIndex("sql", CONTACT_STAGES);
+    let advanceSucceeded = false;
     if (stageIdx < sqlIdx) {
-      await advanceContactStage(meeting.contactId, "sql", "ai_auto", `Meeting booked: ${meeting.title}`);
-      advanced++;
+      const advanceResult = await advanceContactStage(meeting.contactId, "sql", "ai_auto", `Meeting booked: ${meeting.title}`);
+      if (advanceResult.success) {
+        advanced++;
+        advanceSucceeded = true;
+      }
+    } else {
+      // Already at or past SQL — treat as succeeded for deal creation
+      advanceSucceeded = true;
     }
 
-    // Create deal if none exists
-    const existingDeal = await prisma.deal.findFirst({
-      where: { contactId: meeting.contactId, stage: { notIn: ["closed_won", "closed_lost"] } },
-    });
-    if (!existingDeal) {
-      await prisma.deal.create({
-        data: {
-          name: `${contact.firstName} ${contact.lastName} - Discovery`,
-          stage: "discovery",
-          pipeline: "new_business",
-          probability: 10,
-          stageEnteredAt: new Date(),
-          contactId: meeting.contactId,
-          companyId: contact.companyId,
-        },
+    // Create deal if none exists — only if the advance to SQL succeeded (or contact was already at/past SQL)
+    if (advanceSucceeded) {
+      const existingDeal = await prisma.deal.findFirst({
+        where: { contactId: meeting.contactId, stage: { notIn: ["closed_won", "closed_lost"] } },
       });
+      if (!existingDeal) {
+        await prisma.deal.create({
+          data: {
+            name: `${contact.firstName} ${contact.lastName} - Discovery`,
+            stage: "discovery",
+            pipeline: "new_business",
+            probability: 10,
+            stageEnteredAt: new Date(),
+            contactId: meeting.contactId,
+            companyId: contact.companyId,
+          },
+        });
+      }
     }
   }
 

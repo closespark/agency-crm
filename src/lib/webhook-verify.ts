@@ -16,7 +16,7 @@ import { getKey } from "./integration-keys";
 /**
  * Verify a webhook by comparing a header value to a stored secret.
  * Returns true if verified, false if secret is configured but doesn't match.
- * Returns true if no secret is configured (opt-in verification).
+ * Returns false if no secret is configured (secure default).
  */
 export async function verifyWebhookSecret(
   headerValue: string | null,
@@ -25,8 +25,8 @@ export async function verifyWebhookSecret(
 ): Promise<boolean> {
   const secret = await getKey(secretKeyName);
   if (!secret) {
-    // No secret configured — allow (opt-in verification)
-    return true;
+    // No secret configured — reject (secure default)
+    return false;
   }
   return headerValue === secret;
 }
@@ -79,7 +79,7 @@ export async function verifyAlfredWebhook(request: Request): Promise<boolean> {
 export async function verifyGmailWebhook(subscription: string, request?: Request): Promise<boolean> {
   // Step 1: Subscription match
   const expected = await getKey("GMAIL_PUBSUB_SUBSCRIPTION");
-  if (!expected) return true; // No subscription configured — allow
+  if (!expected) return false; // No subscription configured — reject (secure default)
   if (subscription !== expected) return false;
 
   // Step 2: JWT verification (if request provided)

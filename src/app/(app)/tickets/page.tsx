@@ -112,7 +112,7 @@ export default function TicketsPage() {
       label: "Status",
       render: (t) => (
         <Badge variant={STATUS_VARIANT[t.status] || "default"}>
-          {t.status.replace("_", " ")}
+          {t.status.replace(/_/g, " ")}
         </Badge>
       ),
     },

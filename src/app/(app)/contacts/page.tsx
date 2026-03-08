@@ -83,13 +83,18 @@ export default function ContactsPage() {
       },
     });
 
-    const res = await fetch(`/api/contacts${qs}`);
-    const json = await res.json();
-    if (json.data) {
-      setContacts(json.data);
-      setTotalPages(json.meta?.totalPages || 1);
+    try {
+      const res = await fetch(`/api/contacts${qs}`);
+      const json = await res.json();
+      if (json.data) {
+        setContacts(json.data);
+        setTotalPages(json.meta?.totalPages || 1);
+      }
+    } catch (err) {
+      console.error("Failed to fetch contacts:", err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [page, pageSize, debouncedSearch, lifecycleStage, leadStatus]);
 
   useEffect(() => {
@@ -140,7 +145,7 @@ export default function ContactsPage() {
       label: "Lead Status",
       render: (contact) =>
         contact.leadStatus ? (
-          <Badge variant="outline">{contact.leadStatus.replace("_", " ")}</Badge>
+          <Badge variant="outline">{contact.leadStatus.replace(/_/g, " ")}</Badge>
         ) : (
           "-"
         ),

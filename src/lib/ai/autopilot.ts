@@ -312,7 +312,6 @@ export async function generateDailyInsights(): Promise<number> {
     const staleHandoffs = await prisma.contact.updateMany({
       where: {
         handoffInProgress: true,
-        domainTier: "warm",
         updatedAt: { lte: new Date(Date.now() - 2 * 60 * 60 * 1000) },
       },
       data: { handoffInProgress: false },
@@ -327,11 +326,19 @@ export async function generateDailyInsights(): Promise<number> {
   // === SCORING & QUALIFICATION ===
 
   // 1. Apply score decay (25%/month behavioral, full reset at 90 days)
-  await processScoreDecay();
+  try {
+    await processScoreDecay();
+  } catch (err) {
+    console.error("Score decay processing failed:", err);
+  }
 
   // 2. Re-score stale contacts
-  const scoreResult = await batchScoreContacts();
-  insightCount += scoreResult.scored;
+  try {
+    const scoreResult = await batchScoreContacts();
+    insightCount += scoreResult.scored;
+  } catch (err) {
+    console.error("Batch score contacts failed:", err);
+  }
 
   // 3. Process lifecycle auto-advance rules (subscriber→lead→mql→sql based on score/BANT)
   const lifecycleAdvances = await processAutoAdvanceRules();

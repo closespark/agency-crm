@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
   // Verify this is an authorized CI call
   const authHeader = request.headers.get("authorization");
   const expectedToken = process.env.QA_WEBHOOK_SECRET;
-  if (expectedToken && authHeader !== `Bearer ${expectedToken}`) {
+  if (!expectedToken || authHeader !== `Bearer ${expectedToken}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

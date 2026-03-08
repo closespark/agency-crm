@@ -17,6 +17,7 @@ const GMAIL_WATCH_INTERVAL_MS = 6 * 24 * 60 * 60 * 1000; // Re-register every 6 
 let lastAutopilotDate = "";
 let lastGmailWatchAt = 0;
 let isShuttingDown = false;
+let tickRunning = false;
 
 // ============================================
 // MAIN LOOP
@@ -36,6 +37,8 @@ async function isAutopilotPaused(): Promise<boolean> {
 
 async function tick() {
   if (isShuttingDown) return;
+  if (tickRunning) return;
+  tickRunning = true;
 
   try {
     // Check if autopilot has been paused via the UI
@@ -66,6 +69,8 @@ async function tick() {
     await maybeDailyAutopilot();
   } catch (err) {
     console.error("[worker] tick error:", err);
+  } finally {
+    tickRunning = false;
   }
 }
 
@@ -316,7 +321,7 @@ async function maybeDailyAutopilot() {
   let lockAcquired = false;
   try {
     const { acquireDistributedLock } = await import("./lib/redis");
-    lockAcquired = await acquireDistributedLock("daily_autopilot", 600); // 10 min TTL
+    lockAcquired = await acquireDistributedLock("daily_autopilot", 1800); // 30 min TTL
   } catch {
     // Redis unavailable — proceed (single worker assumed)
     lockAcquired = true;
@@ -331,20 +336,25 @@ async function maybeDailyAutopilot() {
   // so a failure in one won't prevent the others from running.
   lastAutopilotDate = today;
 
+  // Persist the daily_run record BEFORE steps execute so a crash/restart won't re-run
+  try {
+    await prisma.systemChangelog.create({
+      data: {
+        category: "autopilot",
+        changeType: "daily_run",
+        description: `Daily autopilot started for ${today}.`,
+        dataEvidence: JSON.stringify({ date: today, startedAt: new Date().toISOString() }),
+      },
+    });
+  } catch (err) {
+    console.error("[worker] failed to write daily_run changelog:", err);
+  }
+
   // ── Step 1: Daily insights ──────────────────────────────────────────
   try {
     const { generateDailyInsights } = await import("./lib/ai/autopilot");
     const insights = await generateDailyInsights();
     console.log(`[worker] daily autopilot complete: ${insights} insights generated`);
-
-    await prisma.systemChangelog.create({
-      data: {
-        category: "autopilot",
-        changeType: "daily_run",
-        description: `Daily autopilot completed. ${insights} insights generated.`,
-        dataEvidence: JSON.stringify({ date: today, insightsGenerated: insights }),
-      },
-    });
   } catch (err) {
     console.error("[worker] daily insights failed:", err);
   }
@@ -503,38 +513,7 @@ async function maybeDailyAutopilot() {
     console.error("[worker] auto-enroll in sequences failed:", err);
   }
 
-  // ── Step 6: Auto-push cold-domain contacts to Instantly ─────────────
-  try {
-    if (process.env.INSTANTLY_API_KEY) {
-      const candidates = await prisma.sequence.findMany({
-        where: {
-          isActive: true,
-          enrollments: {
-            some: {
-              status: "active",
-              contact: { domainTier: "cold" },
-              metadata: { not: { contains: "instantlyCampaignId" } },
-            },
-          },
-        },
-        select: { id: true, name: true },
-      });
-
-      if (candidates.length > 0) {
-        const { pushSequenceToInstantly } = await import("./lib/integrations/sync");
-        for (const seq of candidates) {
-          try {
-            const result = await pushSequenceToInstantly(seq.id);
-            console.log(`[worker] auto-pushed sequence "${seq.name}" to Instantly: ${result.leadsAdded} leads, campaign ${result.instantlyId}`);
-          } catch (err) {
-            console.error(`[worker] auto-push to Instantly failed for sequence ${seq.id}:`, err);
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.error("[worker] Instantly auto-push failed:", err);
-  }
+  // ── Step 6: (removed — Instantly auto-push already handled in processSequences()) ──
 
   // ── Step 7: ICP self-optimization (only triggers after 10+ closed deals)
   try {
@@ -704,6 +683,11 @@ async function start() {
   } catch (err) {
     console.error("[worker] first-boot prospecting check failed:", err);
   }
+
+  // After first-boot prospecting, mark today so the immediate tick() doesn't re-run autopilot
+  const today = new Date().toISOString().split("T")[0];
+  lastAutopilotDate = today;
+  console.log("[worker] first-boot complete — skipping today's autopilot to avoid double run");
 
   // Main loop
   const interval = setInterval(tick, TICK_INTERVAL_MS);

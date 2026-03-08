@@ -105,7 +105,7 @@ Rules:
     return JSON.stringify({ error: "Invalid query expression", generated: expr });
   }
 
-  const forbidden = [/\.delete/, /\.update/, /\.create/, /\.upsert/, /\$execute/, /DROP|ALTER|INSERT|UPDATE|DELETE/i];
+  const forbidden = [/\.delete/, /\.update/, /\.create/, /\.upsert/, /\$execute/, /\$queryRaw/, /\$queryRawUnsafe/, /\$executeRaw/, /\$executeRawUnsafe/, /\["delete"\]/, /\["update"\]/, /\["create"\]/, /DROP|ALTER|INSERT|UPDATE|DELETE/i];
   if (forbidden.some((re) => re.test(expr))) {
     return JSON.stringify({ error: "Write operations not allowed" });
   }
@@ -123,14 +123,17 @@ Rules:
 
 export async function POST(request: NextRequest) {
   const session = await auth();
-  if (!session) {
+  if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { message, history } = await request.json() as {
-    message: string;
-    history: { role: "user" | "assistant"; content: string }[];
-  };
+  let body: { message: string; history: { role: "user" | "assistant"; content: string }[] };
+  try {
+    body = await request.json() as typeof body;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  const { message, history } = body;
 
   if (!message || typeof message !== "string") {
     return NextResponse.json({ error: "Message required" }, { status: 400 });
