@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "npx prisma generate && npx prisma db push --skip-generate && next build",
+    "build": "npx prisma generate && npx prisma db push && next build",
     "start": "HOSTNAME=0.0.0.0 node .next/standalone/server.js",
     "lint": "eslint",
     "worker": "npx tsx src/worker.ts",
