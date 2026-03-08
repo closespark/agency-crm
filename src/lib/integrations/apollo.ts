@@ -4,7 +4,11 @@
 // Rate limits: ~100 req/min per endpoint (fixed-window), 10/sec burst
 
 const APOLLO_BASE = "https://api.apollo.io/api/v1";
-const APOLLO_KEY = () => process.env.APOLLO_API_KEY || "";
+const APOLLO_KEY = () => {
+  const key = process.env.APOLLO_API_KEY || "";
+  if (!key) console.warn("[apollo] APOLLO_API_KEY is not set — API calls will fail");
+  return key;
+};
 
 // ---------------------------------------------------------------------------
 // Rate limiter — Apollo uses fixed-window: ~100 req/min, 10/sec burst.
@@ -83,7 +87,12 @@ async function apolloFetchPost<T>(
     throw new Error(`Apollo API error (${res.status}): ${error}`);
   }
 
-  return res.json() as Promise<T>;
+  const data = await res.json();
+  if (data?.error || data?.message) {
+    throw new Error(`Apollo API rejected: ${data.error || data.message}`);
+  }
+
+  return data as T;
 }
 
 async function apolloFetchGet<T>(

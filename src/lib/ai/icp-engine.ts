@@ -351,18 +351,29 @@ export async function runProspectingCycle(): Promise<{
 
   try {
     const result = await apolloClient.peopleSearch(params);
-    searched = result.people.length;
+    const people = result.people || [];
+    const pagination = result.pagination || { total_entries: 0, total_pages: 0, page: 1 };
+    searched = people.length;
+
+    if (searched === 0) {
+      console.log("[icp-engine] Apollo returned 0 results — check ICP params and API key");
+      await prisma.prospectSearch.update({
+        where: { id: search.id },
+        data: { status: "complete", resultsCount: 0 },
+      });
+      return { searched: 0, accepted: 0, rejected: 0 };
+    }
 
     // Group by company to detect multiple decision makers
     const companyPeople = new Map<string, ApolloPersonResult[]>();
-    for (const person of result.people) {
+    for (const person of people) {
       const domain = person.organization?.website_url || "unknown";
       const existing = companyPeople.get(domain) || [];
       existing.push(person);
       companyPeople.set(domain, existing);
     }
 
-    for (const person of result.people) {
+    for (const person of people) {
       const domain = person.organization?.website_url || "unknown";
       const coworkers = companyPeople.get(domain) || [];
 
@@ -459,17 +470,17 @@ export async function runProspectingCycle(): Promise<{
 
     // Track pagination: advance to next page, or wrap to page 1 if we've exhausted results
     const fetchedPage = params.page || 1;
-    const hasMorePages = result.pagination.total_pages > fetchedPage;
+    const hasMorePages = pagination.total_pages > fetchedPage;
     await prisma.systemChangelog.create({
       data: {
         category: "prospecting",
         changeType: "page_tracker",
-        description: `Fetched page ${fetchedPage}/${result.pagination.total_pages} (${result.pagination.total_entries} total). ${accepted} accepted, ${rejected} rejected.`,
+        description: `Fetched page ${fetchedPage}/${pagination.total_pages} (${pagination.total_entries} total). ${accepted} accepted, ${rejected} rejected.`,
         dataEvidence: JSON.stringify({
           nextPage: hasMorePages ? fetchedPage + 1 : 1,
           icpVersion: icp.version,
-          totalPages: result.pagination.total_pages,
-          totalEntries: result.pagination.total_entries,
+          totalPages: pagination.total_pages,
+          totalEntries: pagination.total_entries,
         }),
       },
     });
