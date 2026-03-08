@@ -8,7 +8,8 @@ import { getKey } from "@/lib/integration-keys";
 // ── Integration checks ───────────────────────────────────────────────────
 
 const INTEGRATION_REQUIREMENTS: Partial<Record<ActionType, string[]>> = {
-  send_email: ["GOOGLE_CLIENT_ID"],
+  // send_email checks domainTier at runtime — cold uses Instantly, warm uses Gmail
+  send_email: [],
   ai_analyze: ["ANTHROPIC_API_KEY"],
   score_contact: ["ANTHROPIC_API_KEY"],
 };
@@ -219,13 +220,46 @@ export async function executeAction(
           break;
         }
 
-        // Send via Gmail — if this fails, the email was NOT sent. Do not log as sent.
-        const { sendEmail } = await import("@/lib/integrations/gmail");
-        await sendEmail({
-          to: contact.email,
-          subject: emailContent.subject,
-          body: emailContent.body,
-        });
+        // Route by domain tier: cold → Instantly, warm → Gmail
+        if (contact.domainTier === "warm") {
+          const googleKey = await getKey("GOOGLE_CLIENT_ID");
+          if (!googleKey) {
+            console.warn("[workflow] Skipping warm email — Google not connected");
+            break;
+          }
+          const { sendEmail } = await import("@/lib/integrations/gmail");
+          await sendEmail({
+            to: contact.email,
+            subject: emailContent.subject,
+            body: emailContent.body,
+          });
+        } else {
+          // Cold tier — send via Instantly
+          const instantlyKey = await getKey("INSTANTLY_API_KEY");
+          if (!instantlyKey) {
+            console.warn("[workflow] Skipping cold email — Instantly not connected");
+            break;
+          }
+          const { instantly: instantlyClient } = await import("@/lib/integrations/instantly");
+          // Find the first active Instantly campaign to add leads to
+          const activeCampaign = await prisma.instantlyCampaign.findFirst({
+            where: { status: "active", instantlyId: { not: null } },
+          });
+          if (activeCampaign?.instantlyId) {
+            await instantlyClient.leads.add(activeCampaign.instantlyId, [{
+              email: contact.email,
+              first_name: contact.firstName || "",
+              last_name: contact.lastName || "",
+              custom_variables: {
+                subject: emailContent.subject,
+                body: emailContent.body,
+              },
+            }]);
+          } else {
+            console.warn(`[workflow] No active Instantly campaign — skipping cold send for ${targetContactId}`);
+            break;
+          }
+        }
 
         // Only log activity AFTER successful send
         const systemUser = await prisma.user.findFirst();

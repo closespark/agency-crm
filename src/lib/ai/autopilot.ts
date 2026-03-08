@@ -135,7 +135,7 @@ export async function processSequenceQueue(): Promise<number> {
       // Determine sending route based on contact's domain tier
       const enrolledContact = await prisma.contact.findUnique({
         where: { id: enrollment.contactId },
-        select: { email: true, domainTier: true, globalOptOut: true },
+        select: { email: true, firstName: true, lastName: true, domainTier: true, globalOptOut: true },
       });
 
       // Respect global opt-out (CAN-SPAM/GDPR compliance)
@@ -162,6 +162,30 @@ export async function processSequenceQueue(): Promise<number> {
           });
           gmailMeta = { gmailMessageId: result.messageId, gmailThreadId: result.threadId };
           stepExecuted = true;
+        } else {
+          // Cold tier — send via Instantly
+          try {
+            const { instantly: instantlyClient } = await import("@/lib/integrations/instantly");
+            const activeCampaign = await prisma.instantlyCampaign.findFirst({
+              where: { status: "active", instantlyId: { not: null } },
+            });
+            if (activeCampaign?.instantlyId) {
+              await instantlyClient.leads.add(activeCampaign.instantlyId, [{
+                email: enrolledContact.email,
+                first_name: enrolledContact.firstName || "",
+                last_name: enrolledContact.lastName || "",
+                custom_variables: {
+                  subject: personalized.subject || currentStep.subject || "",
+                  body: personalized.body,
+                },
+              }]);
+              stepExecuted = true;
+            } else {
+              console.warn(`[autopilot] No active Instantly campaign — skipping cold email for ${enrollment.contactId}`);
+            }
+          } catch (err) {
+            console.error(`[autopilot] Instantly send failed for ${enrollment.contactId}:`, err);
+          }
         }
       } else if (currentStep.channel === "call") {
         // Place outbound AI call via Vapi
