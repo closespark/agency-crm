@@ -102,62 +102,81 @@ export async function processSequenceQueue(): Promise<number> {
         continue;
       }
 
-      // Pre-flight: for cold email steps, verify an active Instantly campaign exists
-      // BEFORE generating AI copy (prevents burning Claude API credits on doomed sends)
-      if (currentStep.channel === "email" && enrolledContact?.domainTier !== "warm") {
-        const activeCampaign = await prisma.instantlyCampaign.findFirst({
-          where: { status: "active", instantlyId: { not: null } },
-        });
-        if (!activeCampaign) {
-          console.warn(`[autopilot] No active Instantly campaign — deferring cold email for ${enrollment.contactId} (1 hour backoff)`);
-          await prisma.sequenceEnrollment.update({
-            where: { id: enrollment.id },
-            data: { nextActionAt: new Date(Date.now() + 60 * 60 * 1000) },
-          });
-          continue; // Skip AI copy generation entirely
-        }
-      }
-
-      // NOW generate AI copy — we know a delivery route exists
-      const { gatherContactIntelligence, generateStepCopy } = await import("./sequence-generator");
-      const intel = await gatherContactIntelligence(enrollment.contactId, enrollment.sequenceId);
+      // Check if this is a PhantomBuster confirmation poll (copy already generated on previous tick)
+      const enrollmentMeta = safeParseJSON<Record<string, unknown>>(enrollment.metadata, {});
+      const isPBConfirmation = !!(enrollmentMeta.pbContainerId && enrollmentMeta.pbCopy);
 
       let personalized: { subject?: string; body: string };
 
-      if (currentStep.angle) {
-        const copy = await generateStepCopy({
-          step: currentStep as import("./sequence-generator").SequenceStep,
-          intel,
-          sequenceName: enrollment.sequence.name,
-          sequenceStrategy: enrollment.sequence.description || "",
-          sequenceType: enrollment.sequence.type,
-          enrollmentMetadata: safeParseJSON<Record<string, unknown>>(enrollment.metadata, {}),
-        });
-        personalized = copy;
+      if (isPBConfirmation) {
+        // Restore copy from metadata — don't regenerate with AI
+        personalized = enrollmentMeta.pbCopy as { subject?: string; body: string };
       } else {
-        const personalizedResult = await runAIJob(
-          "email_composer",
-          "personalize_step",
-          {
-            template: currentStep,
-            contact: {
-              firstName: enrollment.contact.firstName,
-              lastName: enrollment.contact.lastName,
-              email: enrollment.contact.email,
-              jobTitle: enrollment.contact.jobTitle,
-              companyName: enrollment.contact.company?.name,
-              industry: enrollment.contact.company?.industry,
+        // Pre-flight: for cold email steps, verify an active Instantly campaign exists
+        // BEFORE generating AI copy (prevents burning Claude API credits on doomed sends)
+        if (currentStep.channel === "email" && enrolledContact?.domainTier !== "warm") {
+          const activeCampaign = await prisma.instantlyCampaign.findFirst({
+            where: { status: "active", instantlyId: { not: null } },
+          });
+          if (!activeCampaign) {
+            console.warn(`[autopilot] No active Instantly campaign — deferring cold email for ${enrollment.contactId} (1 hour backoff)`);
+            await prisma.sequenceEnrollment.update({
+              where: { id: enrollment.id },
+              data: { nextActionAt: new Date(Date.now() + 60 * 60 * 1000) },
+            });
+            continue;
+          }
+        }
+
+        // Pre-flight: for LinkedIn steps, verify PhantomBuster is configured
+        if (currentStep.channel === "linkedin") {
+          const outreachPhantomId = process.env.PHANTOMBUSTER_OUTREACH_PHANTOM_ID;
+          const messagePhantomId = process.env.PHANTOMBUSTER_MESSAGE_PHANTOM_ID;
+          if (!outreachPhantomId && !messagePhantomId) {
+            console.warn(`[autopilot] No PhantomBuster phantom IDs configured — skipping LinkedIn step for ${enrollment.contactId}`);
+            continue;
+          }
+        }
+
+        // Generate AI copy — we know a delivery route exists
+        const { gatherContactIntelligence, generateStepCopy } = await import("./sequence-generator");
+        const intel = await gatherContactIntelligence(enrollment.contactId, enrollment.sequenceId);
+
+        if (currentStep.angle) {
+          const copy = await generateStepCopy({
+            step: currentStep as import("./sequence-generator").SequenceStep,
+            intel,
+            sequenceName: enrollment.sequence.name,
+            sequenceStrategy: enrollment.sequence.description || "",
+            sequenceType: enrollment.sequence.type,
+            enrollmentMetadata: enrollmentMeta,
+          });
+          personalized = copy;
+        } else {
+          const personalizedResult = await runAIJob(
+            "email_composer",
+            "personalize_step",
+            {
+              template: currentStep,
+              contact: {
+                firstName: enrollment.contact.firstName,
+                lastName: enrollment.contact.lastName,
+                email: enrollment.contact.email,
+                jobTitle: enrollment.contact.jobTitle,
+                companyName: enrollment.contact.company?.name,
+                industry: enrollment.contact.company?.industry,
+              },
+              discoveryNotes: intel.conversations
+                .filter((c) => c.direction === "inbound")
+                .map((c) => c.summary || c.content)
+                .join("\n"),
+              bantData: intel.bant,
+              engagementData: intel.engagement,
             },
-            discoveryNotes: intel.conversations
-              .filter((c) => c.direction === "inbound")
-              .map((c) => c.summary || c.content)
-              .join("\n"),
-            bantData: intel.bant,
-            engagementData: intel.engagement,
-          },
-          { contactId: enrollment.contactId }
-        );
-        personalized = personalizedResult.output as { subject?: string; body: string };
+            { contactId: enrollment.contactId }
+          );
+          personalized = personalizedResult.output as { subject?: string; body: string };
+        }
       }
 
       let gmailMeta: { gmailMessageId?: string; gmailThreadId?: string } = {};
@@ -254,7 +273,7 @@ export async function processSequenceQueue(): Promise<number> {
               console.log(`[autopilot] PhantomBuster confirmed delivery for ${enrollment.contactId} (container: ${existingMeta.pbContainerId})`);
             } else if (agent.lastEndStatus === "error" || agent.lastEndStatus === "launch error") {
               console.error(`[autopilot] PhantomBuster failed for ${enrollment.contactId}: ${agent.lastEndMessage}`);
-              // Clear the phantom tracking so it can retry on next cycle
+              // Clear the phantom tracking + stored copy so retry generates fresh AI copy
               await prisma.sequenceEnrollment.update({
                 where: { id: enrollment.id },
                 data: {
@@ -262,6 +281,7 @@ export async function processSequenceQueue(): Promise<number> {
                     ...existingMeta,
                     pbContainerId: null,
                     pbPhantomId: null,
+                    pbCopy: null,
                     pbFailedAt: new Date().toISOString(),
                     pbError: agent.lastEndMessage,
                   }),
@@ -325,8 +345,8 @@ export async function processSequenceQueue(): Promise<number> {
                   );
                 }
 
-                // Store containerId — don't mark stepExecuted yet
-                // Next tick will poll for completion
+                // Store containerId + AI copy — don't mark stepExecuted yet
+                // Next tick will poll for completion and restore copy from metadata
                 await prisma.sequenceEnrollment.update({
                   where: { id: enrollment.id },
                   data: {
@@ -335,6 +355,7 @@ export async function processSequenceQueue(): Promise<number> {
                       pbContainerId: launchResult.data.containerId,
                       pbPhantomId: phantomId,
                       pbLaunchedAt: new Date().toISOString(),
+                      pbCopy: personalized,
                     }),
                     // Check again in 2 minutes (phantom typically completes in 30-60s)
                     nextActionAt: new Date(Date.now() + 2 * 60 * 1000),
