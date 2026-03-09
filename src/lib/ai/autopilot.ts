@@ -238,64 +238,116 @@ export async function processSequenceQueue(): Promise<number> {
           console.error(`[autopilot] Vapi call failed for ${enrollment.contactId}:`, err);
         }
       } else if (currentStep.channel === "linkedin") {
-        // LinkedIn steps delivered via PhantomBuster
-        try {
-          const contactForLinkedIn = await prisma.contact.findUnique({
-            where: { id: enrollment.contactId },
-            select: { linkedinUrl: true, customFields: true },
-          });
+        // LinkedIn steps delivered via PhantomBuster (async — launch then confirm on next tick)
+        const existingMeta = safeParseJSON<Record<string, unknown>>(enrollment.metadata, {});
 
-          // Try dedicated field first, then fall back to customFields JSON
-          let linkedinUrl = contactForLinkedIn?.linkedinUrl;
-          if (!linkedinUrl && contactForLinkedIn?.customFields) {
-            try {
-              const custom = JSON.parse(contactForLinkedIn.customFields);
-              linkedinUrl = custom.linkedinUrl || custom.linkedin_url || null;
-            } catch { /* ignore parse errors */ }
-          }
+        // Check if we already launched a phantom for this step and are waiting for confirmation
+        if (existingMeta.pbContainerId && existingMeta.pbPhantomId) {
+          // Poll PhantomBuster for completion
+          try {
+            const { phantombuster } = await import("@/lib/integrations/phantombuster");
+            const agentInfo = await phantombuster.agents.fetch(existingMeta.pbPhantomId as string);
+            const agent = agentInfo.data;
 
-          if (!linkedinUrl) {
-            console.warn(`[autopilot] No LinkedIn URL for contact ${enrollment.contactId} — skipping LinkedIn step`);
-          } else {
-            const outreachPhantomId = process.env.PHANTOMBUSTER_OUTREACH_PHANTOM_ID;
-            const messagePhantomId = process.env.PHANTOMBUSTER_MESSAGE_PHANTOM_ID;
-
-            if (!outreachPhantomId && !messagePhantomId) {
-              console.warn(`[autopilot] No PhantomBuster phantom IDs configured — skipping LinkedIn step`);
+            if (agent.lastEndStatus === "success") {
+              stepExecuted = true;
+              console.log(`[autopilot] PhantomBuster confirmed delivery for ${enrollment.contactId} (container: ${existingMeta.pbContainerId})`);
+            } else if (agent.lastEndStatus === "error" || agent.lastEndStatus === "launch error") {
+              console.error(`[autopilot] PhantomBuster failed for ${enrollment.contactId}: ${agent.lastEndMessage}`);
+              // Clear the phantom tracking so it can retry on next cycle
+              await prisma.sequenceEnrollment.update({
+                where: { id: enrollment.id },
+                data: {
+                  metadata: JSON.stringify({
+                    ...existingMeta,
+                    pbContainerId: null,
+                    pbPhantomId: null,
+                    pbFailedAt: new Date().toISOString(),
+                    pbError: agent.lastEndMessage,
+                  }),
+                  nextActionAt: new Date(Date.now() + 60 * 60 * 1000), // Retry in 1 hour
+                },
+              });
+              continue;
             } else {
-              const { phantombuster } = await import("@/lib/integrations/phantombuster");
+              // Still running — check again on next tick
+              console.log(`[autopilot] PhantomBuster still running for ${enrollment.contactId} — will check next tick`);
+              continue;
+            }
+          } catch (err) {
+            console.error(`[autopilot] PhantomBuster status check failed for ${enrollment.contactId}:`, err);
+            continue;
+          }
+        } else {
+          // First attempt — launch the phantom
+          try {
+            const contactForLinkedIn = await prisma.contact.findUnique({
+              where: { id: enrollment.contactId },
+              select: { linkedinUrl: true, customFields: true },
+            });
 
-              // Use Message Sender for existing connections (later steps),
-              // Outreach phantom for first touch (connection request + message)
-              if (enrollment.currentStep === 0 && outreachPhantomId) {
-                // First LinkedIn touch — send connection request with personalized message
-                await phantombuster.linkedin.sendConnectionRequest(
-                  outreachPhantomId,
-                  linkedinUrl,
-                  personalized.body
-                );
-                stepExecuted = true;
-              } else if (messagePhantomId) {
-                // Follow-up — DM existing connection
-                await phantombuster.linkedin.sendMessage(
-                  messagePhantomId,
-                  linkedinUrl,
-                  personalized.body
-                );
-                stepExecuted = true;
-              } else if (outreachPhantomId) {
-                // Only outreach phantom configured — use it for all steps
-                await phantombuster.linkedin.sendConnectionRequest(
-                  outreachPhantomId,
-                  linkedinUrl,
-                  personalized.body
-                );
-                stepExecuted = true;
+            let linkedinUrl = contactForLinkedIn?.linkedinUrl;
+            if (!linkedinUrl && contactForLinkedIn?.customFields) {
+              try {
+                const custom = JSON.parse(contactForLinkedIn.customFields);
+                linkedinUrl = custom.linkedinUrl || custom.linkedin_url || null;
+              } catch { /* ignore parse errors */ }
+            }
+
+            if (!linkedinUrl) {
+              console.warn(`[autopilot] No LinkedIn URL for contact ${enrollment.contactId} — skipping LinkedIn step`);
+            } else {
+              const outreachPhantomId = process.env.PHANTOMBUSTER_OUTREACH_PHANTOM_ID;
+              const messagePhantomId = process.env.PHANTOMBUSTER_MESSAGE_PHANTOM_ID;
+
+              if (!outreachPhantomId && !messagePhantomId) {
+                console.warn(`[autopilot] No PhantomBuster phantom IDs configured — skipping LinkedIn step`);
+              } else {
+                const { phantombuster } = await import("@/lib/integrations/phantombuster");
+
+                let launchResult;
+                let phantomId: string;
+
+                if (enrollment.currentStep === 0 && outreachPhantomId) {
+                  phantomId = outreachPhantomId;
+                  launchResult = await phantombuster.linkedin.sendConnectionRequest(
+                    outreachPhantomId, linkedinUrl, personalized.body
+                  );
+                } else if (messagePhantomId) {
+                  phantomId = messagePhantomId;
+                  launchResult = await phantombuster.linkedin.sendMessage(
+                    messagePhantomId, linkedinUrl, personalized.body
+                  );
+                } else {
+                  phantomId = outreachPhantomId!;
+                  launchResult = await phantombuster.linkedin.sendConnectionRequest(
+                    outreachPhantomId!, linkedinUrl, personalized.body
+                  );
+                }
+
+                // Store containerId — don't mark stepExecuted yet
+                // Next tick will poll for completion
+                await prisma.sequenceEnrollment.update({
+                  where: { id: enrollment.id },
+                  data: {
+                    metadata: JSON.stringify({
+                      ...existingMeta,
+                      pbContainerId: launchResult.data.containerId,
+                      pbPhantomId: phantomId,
+                      pbLaunchedAt: new Date().toISOString(),
+                    }),
+                    // Check again in 2 minutes (phantom typically completes in 30-60s)
+                    nextActionAt: new Date(Date.now() + 2 * 60 * 1000),
+                  },
+                });
+
+                console.log(`[autopilot] PhantomBuster launched for ${enrollment.contactId} (container: ${launchResult.data.containerId}) — will confirm on next tick`);
+                continue; // Don't advance step yet — wait for confirmation
               }
             }
+          } catch (err) {
+            console.error(`[autopilot] PhantomBuster LinkedIn launch failed for ${enrollment.contactId}:`, err);
           }
-        } catch (err) {
-          console.error(`[autopilot] PhantomBuster LinkedIn step failed for ${enrollment.contactId}:`, err);
         }
       }
 
